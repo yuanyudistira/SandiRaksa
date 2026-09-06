@@ -1019,6 +1019,25 @@ MUST:
 
 ### 8.2 XLSX
 
+#### Large XLSX Requirements
+
+For large workbooks, the XLSX processor MUST:
+
+- enumerate worksheets without materializing unnecessary data;
+- support iterative row traversal;
+- avoid converting the workbook to a DataFrame;
+- scan worksheet data in bounded batches;
+- expose per-sheet progress;
+- support cancellation between batches;
+- limit simultaneous large-workbook workers;
+- avoid retaining plaintext cell batches after findings have been converted to review/treatment records;
+- separate detection from mutation where appropriate;
+- preserve formulas/styles/charts/relationships according to supported coverage;
+- report when a workbook feature forces a higher-memory fallback path.
+
+If a fallback path may substantially increase memory usage, the user SHOULD receive a warning before processing a very large workbook.
+
+
 MUST inspect, where technically supported:
 
 - visible sheets;
@@ -1364,6 +1383,233 @@ Clipboard copying of original sensitive values SHOULD require explicit user acti
 ---
 
 ## 13. Performance Requirements
+
+### 13.1 Large Workbook / Large File Performance
+
+SandiRaksa MUST be designed for real-world enterprise files, including Excel workbooks with:
+
+- many worksheets;
+- hidden and very-hidden worksheets;
+- tens of thousands of rows per worksheet;
+- hundreds of thousands to millions of populated cells;
+- formulas, comments, hyperlinks, metadata, charts, and mixed content.
+
+The implementation MUST avoid algorithms that require duplicating the complete workbook contents in memory.
+
+#### Required Processing Strategy
+
+For large CSV/XLSX workloads:
+
+- scanning MUST be iterative/streaming where technically possible;
+- workbook scanning SHOULD process one worksheet at a time;
+- text extraction MUST be processed in bounded batches;
+- NLP/Presidio analysis MUST be batched rather than called once per cell;
+- raw extracted text MUST NOT be retained after the corresponding batch is processed unless needed for active review;
+- processing MUST NOT require converting an entire workbook into a pandas DataFrame;
+- concurrent processing of large files MUST be limited by a resource-aware scheduler;
+- scan and write/treatment phases MAY use different file access modes;
+- treatment MUST preserve workbook integrity and SHOULD modify only required OOXML/package parts where feasible.
+
+#### Suggested Size Classes
+
+The application SHOULD classify file/workbook workloads for scheduling and user feedback:
+
+```text
+Small
+- <= 10 MB
+- <= 50,000 populated cells
+
+Medium
+- 10–50 MB
+- 50,000–500,000 populated cells
+
+Large
+- 50–200 MB
+- 500,000–2,000,000 populated cells
+
+Very Large
+- > 200 MB or > 2,000,000 populated cells
+```
+
+These thresholds are initial product defaults and MUST be configurable after benchmarking.
+
+The application MUST NOT reject a file solely because it falls into a larger class unless a configured safety/resource limit is exceeded.
+
+#### UI Responsiveness
+
+For all file sizes:
+
+- the GUI thread MUST remain responsive;
+- progress MUST be visible;
+- users MUST be able to cancel processing;
+- cancel MUST not corrupt the source file, project database, mapping vault, or completed outputs;
+- progress SHOULD show:
+  - current file;
+  - current worksheet/document component;
+  - rows/cells/segments processed where measurable;
+  - overall progress;
+  - current phase: validating, scanning, reviewing, protecting, re-scanning, restoring.
+
+#### Memory Requirements
+
+The implementation MUST:
+
+- avoid unbounded memory growth;
+- avoid keeping duplicate copies of workbook text;
+- release batch data as soon as possible;
+- avoid loading all worksheets into duplicated intermediate structures;
+- enforce configurable upper resource limits.
+
+Target:
+
+```text
+Peak application memory SHOULD remain below approximately
+2.5x–3x the logical active working-set size where technically feasible.
+```
+
+This is a design target, not a guarantee for every third-party parser or document type.
+
+If memory pressure becomes unsafe, the application MUST:
+
+- reduce batch size;
+- reduce file-level concurrency;
+- pause new workers;
+- or stop the operation with a clear resource-limit message.
+
+It MUST NOT silently allow the operating system to enter severe memory pressure when the application can detect and prevent it.
+
+#### Batch Processing
+
+Batch sizes MUST be configurable internally.
+
+Initial engineering benchmark candidates:
+
+```text
+Text segments per detection batch: 250–2,000
+Rows per CSV batch:               500–5,000
+XLSX logical cells per batch:     500–5,000
+```
+
+Final defaults MUST be chosen from benchmark data, not from this document alone.
+
+#### Concurrency
+
+The application MUST distinguish between:
+
+- UI concurrency;
+- file-level concurrency;
+- NLP concurrency;
+- document-write concurrency.
+
+Default behavior SHOULD prioritize predictable memory use over maximum throughput.
+
+For large files:
+
+```text
+default concurrent large workbook processing = 1
+```
+
+Additional small files MAY be processed concurrently if memory/resource limits permit.
+
+The system SHOULD expose a resource-aware worker policy rather than a fixed "number of threads" assumption.
+
+#### XLSX Scan/Write Separation
+
+For XLSX:
+
+- scanning SHOULD use `openpyxl` read-only/iterative modes where compatible;
+- treatment/write operations MUST use a representation capable of preserving/modifying the workbook safely;
+- large workbook scanning and workbook rewriting SHOULD be treated as separate phases;
+- the application SHOULD avoid a full mutable workbook load during the initial detection pass where possible.
+
+Where high-level libraries cannot preserve required content efficiently, targeted OOXML part editing MAY be used.
+
+---
+
+### 13.2 Performance Benchmark Corpus
+
+The development team MUST maintain synthetic performance fixtures.
+
+Minimum benchmark scenarios:
+
+```text
+Workbook A
+- 10 worksheets
+- 10,000 rows per worksheet
+- 20 columns
+- mostly plain text/numeric cells
+
+Workbook B
+- 30 worksheets
+- 50,000 rows per worksheet
+- 10 columns
+- mixed text and numeric data
+
+Workbook C
+- formulas
+- hidden sheets
+- very-hidden sheets
+- comments
+- hyperlinks
+- charts
+- metadata
+- mixed formatting
+
+Workbook D
+- >= 1,000,000 populated cells
+- repeated entity values
+- representative PII distribution
+
+Workbook E
+- multiple large files added to one project
+- validates concurrency and project token consistency
+```
+
+Benchmarks MUST measure:
+
+- validation time;
+- scan time;
+- review-data preparation time;
+- treatment/write time;
+- leakage re-scan time;
+- restore time;
+- peak resident memory;
+- CPU utilization;
+- temporary-disk usage;
+- output file size;
+- output document integrity;
+- token consistency.
+
+Benchmark results SHOULD be retained per release candidate so performance regressions are visible.
+
+---
+
+### 13.3 Performance Acceptance Criteria
+
+The MVP MUST meet the following behavioral criteria:
+
+1. A large-file scan MUST NOT block the GUI event loop.
+2. Progress MUST update periodically throughout long-running scans.
+3. Cancellation MUST complete without corrupting source/project/vault data.
+4. Memory use MUST remain bounded by configurable resource policies.
+5. The application MUST NOT load all CSV rows into memory for normal scanning.
+6. Large XLSX scans MUST use iterative traversal where technically possible.
+7. Detection MUST operate on batches rather than one expensive NLP call per cell.
+8. Multiple large workbooks MUST NOT be processed in unlimited parallelism.
+9. A completed protected output MUST still pass structural validation and leakage re-scan regardless of size.
+10. Performance optimization MUST NOT reduce document coverage silently.
+
+Initial target hardware SHOULD be defined for release benchmarking, for example:
+
+```text
+4–8 CPU cores
+16 GB RAM
+SSD storage
+supported Windows/macOS/Linux release
+```
+
+Exact throughput targets MAY be finalized after prototype benchmarks, but the team MUST establish release gates before v1.0.
+
 
 Initial targets for typical modern desktop hardware:
 
@@ -1713,6 +1959,8 @@ MVP is complete only when:
 - application runs offline;
 - packaged builds work without Python installed;
 - Windows, macOS, Linux release artifacts pass smoke tests;
+- large-workbook benchmark corpus passes release performance gates;
+- large XLSX processing remains responsive, cancellable, and resource-bounded;
 - privacy limitations are documented in-app;
 - source and protected documents are never silently overwritten.
 
