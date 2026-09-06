@@ -1153,6 +1153,37 @@ The application does not evaluate formulas, but it SHOULD preserve or optionally
 
 # 21. XLSX Handler
 
+## 21.2 XLSX Large-Workbook Strategy
+
+The XLSX handler must support two distinct modes:
+
+```text
+SCAN MODE
+- iterative/read-only where possible
+- minimal memory
+- no mutation
+
+TREATMENT MODE
+- mutable high-level model when safe
+- targeted OOXML fallback for scale/preservation when required
+```
+
+The handler MUST expose workload metadata to the scheduler before full processing.
+
+For large workbooks:
+
+- iterate worksheet rows;
+- build bounded `TextSegment` batches;
+- invoke detection in batches;
+- release plaintext batches promptly;
+- record progress by worksheet/batch;
+- do not load unrelated worksheets into duplicated structures;
+- do not build a DataFrame representation;
+- do not parallelize multiple large workbooks by default.
+
+High-level mutable loading is acceptable only when benchmark/resource policy determines that it is safe.
+
+
 Use `openpyxl` plus OOXML fallback.
 
 Inventory MUST detect:
@@ -2838,7 +2869,550 @@ Internal IDs remain stable English-like constants.
 
 ---
 
+# 71.1 Large File / Large Workbook Processing Architecture
+
+SandiRaksa must support workbooks whose logical content is much larger than the compressed `.xlsx` file size.
+
+Example:
+
+```text
+50 MB XLSX on disk
+may represent
+hundreds of MB or more of XML/text when expanded.
+```
+
+Therefore, all resource planning must use logical working-set estimates, not compressed file size alone.
+
+---
+
+## 71.1.1 Processing Model
+
+Use a staged pipeline:
+
+```text
+Validate Package
+    ->
+Inventory Workbook
+    ->
+Estimate Workload
+    ->
+Choose Resource Plan
+    ->
+Stream / Iterate Worksheet Content
+    ->
+Build Detection Batches
+    ->
+Run Detection
+    ->
+Persist Minimal Finding Metadata
+    ->
+Release Batch Memory
+    ->
+User Review
+    ->
+Re-open / Mutable Treatment Pass
+    ->
+Write Protected Output
+    ->
+Re-open Output
+    ->
+Leakage Re-Scan
+```
+
+Scanning and mutation are intentionally separate.
+
+---
+
+## 71.1.2 Workload Estimator
+
+Before a full scan, estimate:
+
+- compressed file size;
+- ZIP expanded-size total;
+- worksheet count;
+- shared string count;
+- approximate used ranges;
+- populated cell estimates;
+- comment count;
+- hyperlink count;
+- chart count;
+- hidden/very-hidden sheet count;
+- formula count where cheaply discoverable.
+
+Create:
+
+```python
+class WorkloadEstimate(BaseModel):
+    file_size_bytes: int
+    expanded_size_bytes: int | None
+    worksheet_count: int
+    estimated_populated_cells: int | None
+    estimated_text_cells: int | None
+    size_class: str
+    recommended_batch_size: int
+    recommended_file_concurrency: int
+    requires_high_memory_fallback: bool
+```
+
+The estimator must be cheap relative to a full scan.
+
+---
+
+## 71.1.3 Large Workbook Size Classes
+
+Initial scheduling classes:
+
+```text
+SMALL
+<= 10 MB and <= 50k populated cells
+
+MEDIUM
+10–50 MB or 50k–500k populated cells
+
+LARGE
+50–200 MB or 500k–2M populated cells
+
+VERY_LARGE
+> 200 MB or > 2M populated cells
+```
+
+These are tuning defaults, not semantic limits.
+
+---
+
+## 71.1.4 XLSX Scan Mode
+
+For the detection pass:
+
+```python
+openpyxl.load_workbook(
+    path,
+    read_only=True,
+    data_only=False,
+    keep_links=True,
+)
+```
+
+or equivalent safe iterative access SHOULD be used when compatible with required coverage.
+
+Important:
+
+- `read_only=True` is for scanning/iteration, not final mutation.
+- formula text should be preserved for analysis where relevant;
+- no formulas are evaluated;
+- external links are not followed.
+
+If a required workbook component is not visible through the read-only high-level API, inspect its OOXML part separately.
+
+---
+
+## 71.1.5 Bounded Detection Batches
+
+Never send one cell at a time through the full NLP stack if batching is possible.
+
+Use:
+
+```python
+class DetectionBatch(BaseModel):
+    batch_id: UUID
+    segments: list[TextSegment]
+    total_chars: int
+```
+
+Batch termination triggers SHOULD include:
+
+```text
+max segment count
+max character count
+max estimated memory
+worksheet boundary when beneficial
+cancellation request
+```
+
+Initial benchmark candidates:
+
+```text
+500–5,000 logical cells
+or
+250–2,000 text segments
+or
+~0.5–2 MB logical text per NLP batch
+```
+
+Actual defaults are benchmark-derived.
+
+---
+
+## 71.1.6 Cell-to-Segment Strategy
+
+Do not concatenate an entire worksheet into one giant string.
+
+Preferred:
+
+```text
+worksheet
+  ->
+row iterator
+  ->
+cell text
+  ->
+logical segments
+  ->
+bounded detection batch
+```
+
+Each segment maintains:
+
+```text
+sheet ID
+cell coordinate
+component type
+offset mapping
+```
+
+This permits review and treatment without retaining entire-sheet plaintext.
+
+---
+
+## 71.1.7 Finding Persistence
+
+After each batch:
+
+1. convert raw detector output to `Finding`;
+2. persist only required metadata;
+3. if reversible treatment is not yet approved, do not persist plaintext unless necessary;
+4. keep short-lived preview/context only in encrypted/transient review storage if needed;
+5. release batch plaintext.
+
+Do not maintain a global list containing all raw workbook cell strings.
+
+---
+
+## 71.1.8 Large Workbook Treatment Pass
+
+The treatment pass may require a mutable workbook representation.
+
+Options, in priority order:
+
+### Option A — High-Level Mutable Workbook
+
+Use normal `openpyxl` load when memory estimate is acceptable and feature preservation is validated.
+
+### Option B — Targeted OOXML Mutation
+
+For very large or feature-sensitive workbooks:
+
+```text
+original XLSX ZIP
+   ->
+copy untouched parts
+   ->
+modify only affected XML/string parts
+   ->
+rebuild ZIP package
+```
+
+This is technically more complex but can reduce memory and preserve unsupported workbook features.
+
+The development team should not implement Option B prematurely for every workbook; introduce it when benchmarks or preservation tests justify it.
+
+---
+
+## 71.1.9 Shared Strings
+
+Large XLSX files may use a shared string table.
+
+The architecture must support:
+
+- scanning shared-string-backed cells;
+- mapping cell references to string indices;
+- modifying shared strings carefully;
+- avoiding an edit that unintentionally changes multiple cells when only one occurrence should be protected.
+
+If one shared string is referenced by multiple cells but treatment decisions differ, the writer MUST create distinct string entries or use an equivalent safe representation.
+
+This is a critical XLSX correctness case.
+
+---
+
+## 71.1.10 Resource-Aware Scheduler
+
+Introduce:
+
+```python
+class ResourceScheduler:
+    def plan(self, workloads: list[WorkloadEstimate]) -> WorkerPlan:
+        ...
+```
+
+The scheduler considers:
+
+- logical workload size;
+- available RAM;
+- CPU count;
+- active NLP model;
+- current worker load;
+- number of large files.
+
+Rules:
+
+```text
+Large/Very Large workbook:
+    max concurrent file workers = 1 by default
+
+Medium:
+    limited concurrency
+
+Small:
+    may run concurrently within global limits
+```
+
+Do not derive concurrency from CPU count alone.
+
+---
+
+## 71.1.11 Memory Pressure Handling
+
+The application SHOULD monitor process memory using a lightweight mechanism.
+
+A dependency such as `psutil` MAY be added if cross-platform memory monitoring proves necessary.
+
+If used, add it to the runtime dependency list and release lock file.
+
+Resource response:
+
+```text
+memory warning
+    ->
+reduce future batch size
+    ->
+pause scheduling new files
+    ->
+allow current safe batch to complete
+    ->
+if still unsafe:
+        cancel operation cleanly
+```
+
+Never kill the process abruptly as the normal resource-control strategy.
+
+---
+
+## 71.1.12 Progress Model
+
+Progress events:
+
+```python
+class ProgressEvent(BaseModel):
+    operation_id: UUID
+    file_id: UUID
+    phase: str
+    component: str | None
+    current: int | None
+    total: int | None
+    message_key: str
+```
+
+Example:
+
+```text
+Memindai model.xlsx
+Sheet 7 dari 24
+42,500 dari 120,000 baris
+```
+
+If exact total rows are expensive to calculate, use:
+
+- worksheet progress;
+- batches completed;
+- indeterminate progress for unknown totals.
+
+Do not perform a full expensive pre-scan only to calculate an exact progress percentage.
+
+---
+
+## 71.1.13 Cancellation
+
+Cancellation token is checked:
+
+- between worksheets;
+- between row batches;
+- before/after NLP batches;
+- before output write;
+- between re-scan batches.
+
+Cancellation behavior:
+
+```text
+stop accepting new batches
+wait for current atomic step
+rollback DB transaction
+clean temp output
+mark operation CANCELLED
+```
+
+Vault mappings created only for a cancelled, uncommitted operation SHOULD be rolled back where possible.
+
+---
+
+## 71.1.14 Temporary Disk Use
+
+Large OOXML manipulation may use temp disk to reduce RAM.
+
+Permitted:
+
+- app-owned temp ZIP copies;
+- transformed XML parts;
+- batch work files when strictly necessary.
+
+Requirements:
+
+- randomized filenames;
+- user-specific temp directory;
+- no sensitive plaintext in filenames;
+- encrypted temp content when feasible;
+- immediate cleanup after commit/failure;
+- startup cleanup for verified stale app temp directories.
+
+The application should prefer bounded disk usage over unbounded memory usage.
+
+---
+
+## 71.1.15 Multi-File Project Processing
+
+A project may contain:
+
+```text
+20 XLSX files
+10 DOCX files
+5 PPTX files
+```
+
+Do not start all workers immediately.
+
+Queue:
+
+```text
+Pending
+  ->
+Scheduler
+  ->
+Active workers
+  ->
+Completed / Failed / Cancelled
+```
+
+Token mapping remains project-consistent because all mapping writes go through the project `TokenVault` repository with transactional uniqueness constraints.
+
+---
+
+## 71.1.16 Large-File Error States
+
+Add resource-specific codes:
+
+```text
+RESOURCE_MEMORY_LIMIT
+RESOURCE_TEMP_DISK_LIMIT
+WORKBOOK_TOO_LARGE_FOR_MUTABLE_MODE
+WORKBOOK_REQUIRES_FALLBACK
+WORKBOOK_UNSUPPORTED_FEATURE_AT_SCALE
+OPERATION_CANCELLED
+```
+
+The UI must explain recovery options, for example:
+
+```text
+This workbook is too large for the current processing mode.
+SandiRaksa can retry using a lower-memory mode.
+```
+
+where such a mode is implemented.
+
+---
+
+## 71.1.17 Benchmark Harness
+
+Add:
+
+```text
+tests/performance/
+```
+
+Suggested structure:
+
+```text
+tests/performance/
+├── generate_workbooks.py
+├── benchmark_scan.py
+├── benchmark_protect.py
+├── benchmark_restore.py
+├── benchmark_memory.py
+└── baselines/
+```
+
+The benchmark generator should create synthetic files, not store large real confidential documents in the repository.
+
+Collect:
+
+```text
+wall-clock duration
+CPU time
+peak RSS
+temporary disk bytes
+input size
+expanded ZIP size
+worksheet count
+populated cells
+findings count
+output size
+validation result
+```
+
+Store release baselines as JSON/CSV artifacts.
+
+---
+
+## 71.1.18 Performance Regression Gate
+
+CI does not need to run the largest benchmark on every pull request.
+
+Recommended:
+
+```text
+PR:
+- small/medium performance smoke
+
+Nightly:
+- medium/large benchmark
+
+Release candidate:
+- complete performance corpus
+```
+
+Release gate examples:
+
+- no >25% unexplained scan-time regression on baseline hardware;
+- no >25% unexplained peak-memory regression;
+- no document-integrity regression;
+- no increase in missed covered entities due to optimization.
+
+Thresholds must be calibrated after baseline measurements.
+
+---
+
 # 72. Performance Architecture
+
+Performance priorities for large structured documents:
+
+1. bounded memory;
+2. UI responsiveness;
+3. deterministic correctness;
+4. document integrity;
+5. privacy coverage;
+6. throughput.
+
+The implementation MUST NOT trade detection coverage or document integrity for speed without explicitly reporting reduced coverage.
+
 
 Optimization order:
 
@@ -3127,6 +3701,10 @@ The development team may call the system MVP-complete only when:
 15. Windows/macOS releases are signed/notarized as required for production.
 16. Help/About/contact/donation UI is complete.
 17. Third-party licenses are included.
+18. The large-workbook performance corpus passes defined release gates.
+19. Large XLSX processing remains responsive and cancellable.
+20. Multiple large files are processed with bounded concurrency.
+21. Peak memory and temporary disk usage are captured in release benchmarks.
 
 ---
 
@@ -3149,6 +3727,7 @@ keyring
 platformdirs
 pydantic
 charset-normalizer
+psutil (optional, if resource monitoring is enabled)
 ```
 
 ## Standard Library
