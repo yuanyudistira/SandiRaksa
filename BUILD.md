@@ -2,6 +2,33 @@
 
 Panduan untuk membuild SandiRaksa menjadi aplikasi standalone executable.
 
+## 🚀 Quick Release (Recommended)
+
+Cara termudah untuk release adalah menggunakan **GitHub Actions**:
+
+```bash
+# 1. Update version di version.py dan pyproject.toml
+# 2. Update CHANGELOG.md
+# 3. Commit dan push
+
+git add .
+git commit -m "Release v0.2.0"
+git tag v0.2.0
+git push origin main --tags
+```
+
+GitHub Actions akan otomatis:
+- ✅ Build Windows executable (.exe)
+- ✅ Build macOS Intel DMG
+- ✅ Build macOS Apple Silicon DMG
+- ✅ Create GitHub Release dengan semua artifacts
+
+Download dari: https://github.com/yuanyudistira/sandiraksa/releases
+
+---
+
+## Manual Build
+
 ## Prerequisites
 
 ### Semua Platform
