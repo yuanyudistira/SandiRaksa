@@ -1,0 +1,84 @@
+# SandiRaksa Product Configuration
+# This file contains build-time and runtime product metadata
+
+[product]
+name = "SandiRaksa"
+display_name = "SandiRaksa"
+company = "SandiRaksa Team"
+description = "Local Privacy Gateway for AI"
+tagline_id = "Lindungi Data Sebelum Berbagi ke AI"
+tagline_en = "Local Privacy Gateway for AI"
+
+[urls]
+support_email = "support@sandiraksa.example.com"
+support_url = "https://sandiraksa.example.com/support"
+documentation_url = "https://sandiraksa.example.com/docs"
+privacy_url = "https://sandiraksa.example.com/privacy"
+donation_url = "https://sandiraksa.example.com/donate"
+release_url = "https://sandiraksa.example.com/download"
+homepage = "https://sandiraksa.example.com"
+
+[defaults]
+# Default UI language (id-ID or en-US)
+language = "id-ID"
+
+# Default reversible protection mode
+reversible_enabled = true
+
+# Default mapping retention policy
+retention_policy = "until_deleted"
+
+# Remember source file paths by default
+remember_source_paths = false
+
+# Default privacy profile
+default_profile = "standard_pii"
+
+[limits]
+# Maximum file size in bytes (100 MB)
+max_file_size_bytes = 104857600
+
+# Maximum expanded ZIP/OOXML size in bytes (500 MB) 
+max_expanded_size_bytes = 524288000
+
+# Maximum number of ZIP entries
+max_zip_entries = 10000
+
+# Maximum projects
+max_projects = 1000
+
+# Detection batch sizes
+detection_batch_segments = 1000
+detection_batch_chars = 500000
+
+# Large file thresholds
+large_file_threshold_bytes = 52428800  # 50 MB
+large_workbook_cells_threshold = 500000
+
+[security]
+# Key derivation iterations for password-based encryption
+pbkdf2_iterations = 600000
+
+# Minimum encryption key bits
+min_key_bits = 256
+
+# Enable secure memory handling where possible
+secure_memory = true
+
+# XML security settings
+xml_max_entity_expansions = 0
+xml_forbid_dtd = true
+xml_forbid_external_entities = true
+
+[logging]
+# Default log level (DEBUG, INFO, WARNING, ERROR)
+default_level = "INFO"
+
+# Enable PII redaction filter (should always be true in production)
+pii_redaction = true
+
+# Maximum log file size in bytes before rotation
+max_log_size_bytes = 10485760  # 10 MB
+
+# Number of log files to keep
+log_backup_count = 5

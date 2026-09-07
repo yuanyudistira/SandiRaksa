@@ -1,0 +1,4 @@
+
+Email: john.doe@example.com
+Phone: +62812345678901
+NIK: 3201011234560001

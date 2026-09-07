@@ -1,0 +1,18 @@
+﻿python : Windows fatal exception: code 0xc0000374
+At line:1 char:26
++ ... \YY\GIT\SandiRaksa; python -X faulthandler -m sandiraksa 2>&1 | Out-F ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Windows fatal exception: code 0xc0000374:String) 
+    [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Current thread 0x0000538c (most recent call first):
+  File "C:\YY\GIT\SandiRaksa\src\sandiraksa\app\application.py", line 88 in run
+  File "C:\YY\GIT\SandiRaksa\src\sandiraksa\__main__.py", line 16 in main
+  File "C:\YY\GIT\SandiRaksa\src\sandiraksa\__main__.py", line 20 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Current thread's C stack trace (most recent call first):
+  <cannot get C stack on this system>

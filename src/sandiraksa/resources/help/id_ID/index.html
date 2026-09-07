@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bantuan SandiRaksa</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #1e293b;
+        }
+        h1 { color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px; }
+        h2 { color: #1d4ed8; margin-top: 30px; }
+        h3 { color: #3b82f6; }
+        code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+        pre { background: #f1f5f9; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        .note { background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .tip { background: #dcfce7; padding: 15px; border-left: 4px solid #22c55e; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .warning { background: #fee2e2; padding: 15px; border-left: 4px solid #ef4444; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        a { color: #2563eb; }
+        ul, ol { padding-left: 25px; }
+        li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Panduan SandiRaksa</h1>
+    
+    <p>SandiRaksa adalah aplikasi desktop untuk melindungi data sensitif sebelum dibagikan ke layanan AI. Semua pemrosesan dilakukan secara lokal di komputer Anda.</p>
+    
+    <h2>📋 Daftar Isi</h2>
+    <ol>
+        <li><a href="#memulai">Memulai</a></li>
+        <li><a href="#proyek">Mengelola Proyek</a></li>
+        <li><a href="#memindai">Memindai Dokumen</a></li>
+        <li><a href="#meninjau">Meninjau Temuan</a></li>
+        <li><a href="#melindungi">Melindungi Data</a></li>
+        <li><a href="#memulihkan">Memulihkan Data</a></li>
+        <li><a href="#format">Format yang Didukung</a></li>
+        <li><a href="#tipe">Tipe Data yang Terdeteksi</a></li>
+        <li><a href="#token">Tentang Token</a></li>
+    </ol>
+    
+    <h2 id="memulai">🚀 Memulai</h2>
+    <ol>
+        <li>Buat proyek baru dengan klik <strong>File → Proyek Baru</strong></li>
+        <li>Beri nama proyek dan pilih profil privasi</li>
+        <li>Tambahkan file dengan drag & drop atau klik tombol Tambah File</li>
+        <li>Klik <strong>Pindai Semua</strong> untuk mendeteksi data sensitif</li>
+        <li>Tinjau temuan dan pilih tindakan</li>
+        <li>Klik <strong>Terapkan Perlindungan</strong> untuk menghasilkan file yang dilindungi</li>
+    </ol>
+    
+    <h2 id="proyek">📁 Mengelola Proyek</h2>
+    <p>Proyek membantu mengorganisir file dan menjaga konsistensi token antar pemindaian.</p>
+    
+    <h3>Membuat Proyek</h3>
+    <ol>
+        <li>Klik <strong>File → Proyek Baru</strong> atau tombol <strong>+</strong></li>
+        <li>Isi nama proyek</li>
+        <li>Pilih profil privasi yang sesuai</li>
+        <li>Klik <strong>Simpan</strong></li>
+    </ol>
+    
+    <div class="tip">
+        <strong>💡 Tips:</strong> Gunakan proyek terpisah untuk konteks berbeda (misalnya: proyek A untuk HR, proyek B untuk keuangan) agar token tidak tercampur.
+    </div>
+    
+    <h2 id="memindai">🔍 Memindai Dokumen</h2>
+    <p>Pemindaian mendeteksi data sensitif dalam dokumen menggunakan:</p>
+    <ul>
+        <li>Pola regex untuk format Indonesia (NIK, NPWP, nomor HP)</li>
+        <li>Named Entity Recognition untuk nama orang dan organisasi</li>
+        <li>Aturan kustom yang Anda definisikan</li>
+    </ul>
+    
+    <h3>Langkah Pemindaian</h3>
+    <ol>
+        <li>Tambahkan file ke proyek</li>
+        <li>Klik <strong>Pindai Semua</strong></li>
+        <li>Tunggu proses selesai</li>
+        <li>Tinjau hasilnya</li>
+    </ol>
+    
+    <h2 id="meninjau">👁️ Meninjau Temuan</h2>
+    <p>Setelah pemindaian, Anda dapat meninjau setiap temuan:</p>
+    
+    <ul>
+        <li><strong>Lindungi</strong> - Ganti dengan token (default)</li>
+        <li><strong>Abaikan</strong> - Biarkan apa adanya</li>
+        <li><strong>Ubah Tipe</strong> - Koreksi tipe entitas</li>
+    </ul>
+    
+    <div class="note">
+        <strong>📝 Catatan:</strong> Keputusan Anda disimpan dan diterapkan konsisten untuk nilai yang sama di seluruh proyek.
+    </div>
+    
+    <h2 id="melindungi">🔒 Melindungi Data</h2>
+    <p>Perlindungan mengganti data sensitif dengan token deterministik.</p>
+    
+    <h3>Contoh</h3>
+    <pre>
+Sebelum: John Doe bekerja di PT ABC dengan email john@abc.com
+Sesudah: [[PERSON_7F31A2]] bekerja di [[ORG_B4C9E1]] dengan email [[EMAIL_3D2F1C]]</pre>
+    
+    <h2 id="memulihkan">🔄 Memulihkan Data</h2>
+    <p>Setelah menerima output dari AI, Anda dapat memulihkan data asli:</p>
+    
+    <ol>
+        <li>Buka menu <strong>Pulihkan</strong></li>
+        <li>Tempel teks yang mengandung token</li>
+        <li>Klik <strong>Pulihkan</strong></li>
+        <li>Salin hasil yang sudah dikembalikan</li>
+    </ol>
+    
+    <div class="warning">
+        <strong>⚠️ Penting:</strong> Pemulihan hanya berfungsi untuk token dari proyek yang sama. Jangan mencampur token dari proyek berbeda.
+    </div>
+    
+    <h2 id="format">📄 Format yang Didukung</h2>
+    <table>
+        <tr><th>Format</th><th>Ekstensi</th><th>Fitur</th></tr>
+        <tr><td>CSV</td><td>.csv</td><td>Deteksi encoding otomatis, preservasi header</td></tr>
+        <tr><td>Excel</td><td>.xlsx, .xls</td><td>Multiple sheet, formula preservation</td></tr>
+        <tr><td>Word</td><td>.docx, .doc</td><td>Paragraf, tabel, header/footer, komentar</td></tr>
+        <tr><td>PowerPoint</td><td>.pptx, .ppt</td><td>Slide, shape, notes</td></tr>
+    </table>
+    
+    <h2 id="tipe">🏷️ Tipe Data yang Terdeteksi</h2>
+    
+    <h3>Data Indonesia</h3>
+    <ul>
+        <li><strong>ID_NIK</strong> - Nomor Induk Kependudukan (16 digit)</li>
+        <li><strong>ID_NPWP</strong> - Nomor Pokok Wajib Pajak</li>
+        <li><strong>ID_KK</strong> - Nomor Kartu Keluarga</li>
+        <li><strong>ID_PHONE</strong> - Nomor telepon Indonesia</li>
+    </ul>
+    
+    <h3>Data Internasional</h3>
+    <ul>
+        <li><strong>PERSON</strong> - Nama orang</li>
+        <li><strong>EMAIL</strong> - Alamat email</li>
+        <li><strong>PHONE</strong> - Nomor telepon umum</li>
+        <li><strong>ADDRESS</strong> - Alamat</li>
+        <li><strong>ORGANIZATION</strong> - Nama organisasi</li>
+        <li><strong>CREDIT_CARD</strong> - Nomor kartu kredit</li>
+        <li><strong>BANK_ACCOUNT</strong> - Nomor rekening</li>
+        <li><strong>IP_ADDRESS</strong> - Alamat IP</li>
+    </ul>
+    
+    <h2 id="token">🎫 Tentang Token</h2>
+    
+    <p>Token adalah placeholder yang menggantikan data sensitif. Format: <code>[[TIPE_HEXID]]</code></p>
+    
+    <h3>Karakteristik Token</h3>
+    <ul>
+        <li><strong>Deterministik</strong> - Nilai yang sama selalu menghasilkan token yang sama</li>
+        <li><strong>Unik per proyek</strong> - Token berbeda antar proyek</li>
+        <li><strong>Tidak dapat ditebak</strong> - ID menggunakan HMAC, bukan sequential</li>
+        <li><strong>Reversibel</strong> - Dapat dikembalikan ke nilai asli</li>
+    </ul>
+    
+    <hr>
+    <p><small>SandiRaksa v0.1.0 • Semua pemrosesan dilakukan secara lokal</small></p>
+</body>
+</html>

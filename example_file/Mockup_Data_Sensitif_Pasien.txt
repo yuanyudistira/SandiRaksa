@@ -1,0 +1,44 @@
+KLASIFIKASI: SANGAT RAHASIA - DATA PRIBADI & KESEHATAN (MOCKUP)
+PERINGATAN: Semua identitas dan catatan medis di file ini sintetis dan bukan data pasien nyata.
+====================================================================================================
+
+[EMR-MOCK-0001001] Aisyah Pratama | Perempuan | Lahir: 14-Feb-1988 | NIK Mock: MOCK-3174-19880214-1001
+Kontak: +62 812-4401-1001 | aisyah.pratama.1001@example.invalid | Alamat Mock: Jl. Melati No. 18, Kebon Jeruk | Penjamin: BPJS Kesehatan
+Kunjungan: 02-Sep-2026 | Keluhan: Demam dan batuk | ICD-10: J06.9 | Diagnosis: ISPA tidak spesifik
+Tanda vital: TD 138/86 mmHg; Suhu 38.1 C; SpO2 96% | Terapi: Paracetamol 500 mg
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001002] Rizky Saputra | Laki-laki | Lahir: 03-Nov-1976 | NIK Mock: MOCK-3273-19761103-1002
+Kontak: +62 813-5522-1002 | rizky.saputra.1002@example.invalid | Alamat Mock: Jl. Cemara No. 72, Coblong | Penjamin: Asuransi Perusahaan
+Kunjungan: 01-Sep-2026 | Keluhan: Kontrol tekanan darah | ICD-10: I10 | Diagnosis: Hipertensi esensial
+Tanda vital: TD 158/96 mmHg; Suhu 36.6 C; SpO2 98% | Terapi: Amlodipine 5 mg
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001003] Dewi Kusuma | Perempuan | Lahir: 28-Jul-1995 | NIK Mock: MOCK-3671-19950728-1003
+Kontak: +62 821-6633-1003 | dewi.kusuma.1003@example.invalid | Alamat Mock: Jl. Anggrek No. 9, Serpong | Penjamin: Pribadi
+Kunjungan: 31-Aug-2026 | Keluhan: Nyeri ulu hati | ICD-10: K30 | Diagnosis: Dispepsia fungsional
+Tanda vital: TD 118/76 mmHg; Suhu 36.7 C; SpO2 99% | Terapi: Omeprazole 20 mg
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001004] Andi Setiawan | Laki-laki | Lahir: 09-Jan-1968 | NIK Mock: MOCK-3175-19680109-1004
+Kontak: +62 822-7744-1004 | andi.setiawan.1004@example.invalid | Alamat Mock: Jl. Kenanga No. 44, Duren Sawit | Penjamin: BPJS Kesehatan
+Kunjungan: 30-Aug-2026 | Keluhan: Kontrol gula darah | ICD-10: E11.9 | Diagnosis: DM tipe 2 tanpa komplikasi
+Tanda vital: TD 146/88 mmHg; Suhu 36.5 C; SpO2 97% | Terapi: Metformin 500 mg
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001005] Nabila Hidayat | Perempuan | Lahir: 21-May-2001 | NIK Mock: MOCK-3578-20010521-1005
+Kontak: +62 856-8855-1005 | nabila.hidayat.1005@example.invalid | Alamat Mock: Jl. Dahlia No. 31, Wonokromo | Penjamin: Asuransi Swasta
+Kunjungan: 29-Aug-2026 | Keluhan: Sesak napas ringan | ICD-10: J45.9 | Diagnosis: Asma tidak spesifik
+Tanda vital: TD 124/79 mmHg; Suhu 36.8 C; SpO2 94% | Terapi: Salbutamol inhaler
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001006] Fajar Nugraha | Laki-laki | Lahir: 17-Sep-1983 | NIK Mock: MOCK-1271-19830917-1006
+Kontak: +62 857-9966-1006 | fajar.nugraha.1006@example.invalid | Alamat Mock: Jl. Rajawali No. 55, Medan Baru | Penjamin: Corporate Guarantee
+Kunjungan: 28-Aug-2026 | Keluhan: Nyeri punggung bawah | ICD-10: M54.5 | Diagnosis: Nyeri punggung bawah
+Tanda vital: TD 132/84 mmHg; Suhu 36.6 C; SpO2 98% | Terapi: Diclofenac gel
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001007] Intan Permana | Perempuan | Lahir: 30-Mar-1992 | NIK Mock: MOCK-7371-19920330-1007
+Kontak: +62 858-1177-1007 | intan.permana.1007@example.invalid | Alamat Mock: Jl. Mawar No. 63, Panakkukang | Penjamin: BPJS Kesehatan
+Kunjungan: 27-Aug-2026 | Keluhan: Ruam kulit dan gatal | ICD-10: L30.9 | Diagnosis: Dermatitis tidak spesifik
+Tanda vital: TD 116/74 mmHg; Suhu 36.9 C; SpO2 99% | Terapi: Cetirizine 10 mg
+----------------------------------------------------------------------------------------------------
+[EMR-MOCK-0001008] Bima Hartono | Laki-laki | Lahir: 11-Dec-1959 | NIK Mock: MOCK-1671-19591211-1008
+Kontak: +62 811-2288-1008 | bima.hartono.1008@example.invalid | Alamat Mock: Jl. Flamboyan No. 26, Ilir Barat I | Penjamin: Pribadi
+Kunjungan: 26-Aug-2026 | Keluhan: Pemeriksaan rutin | ICD-10: Z00.0 | Diagnosis: Pemeriksaan medis umum
+Tanda vital: TD 142/91 mmHg; Suhu 36.5 C; SpO2 97% | Terapi: Kontrol ulang 1 bulan
+----------------------------------------------------------------------------------------------------

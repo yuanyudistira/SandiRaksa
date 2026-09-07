@@ -1,0 +1,39 @@
+Data Pasien Rumah Sakit ABC
+===========================
+
+Nama Pasien: Budi Santoso
+NIK: 3271234567890123
+Email: budi.santoso@email.com
+Telepon: 081234567890
+
+Alamat: Jl. Sudirman No. 123, Jakarta Selatan
+
+Tanggal Lahir: 15/03/1985
+No. Rekam Medis: RM-2024-001234
+
+---
+
+Nama Pasien: Siti Rahayu  
+NIK: 3175098765432109
+Email: siti.rahayu@gmail.com
+Telepon: +62 812-3456-7890
+
+Alamat: Jl. Gatot Subroto Kav. 45, Jakarta Pusat
+
+Tanggal Lahir: 22-08-1990
+No. Rekam Medis: RM-2024-005678
+
+---
+
+Informasi Kontak Darurat:
+- Dr. Ahmad (Internal): ahmad.dr@hospital.co.id, 021-5551234
+- Ambulance: 118 atau 081199887766
+
+Server Info (untuk IT):
+- IP Database: 192.168.1.100
+- IP Backup: 10.0.0.55
+- Admin URL: https://admin.hospital-internal.com/dashboard
+
+Kartu Kredit untuk pembayaran otomatis:
+4111-2222-3333-4444 (Visa)
+5500 1234 5678 9012 (Mastercard)

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SandiRaksa Help</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #1e293b;
+        }
+        h1 { color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px; }
+        h2 { color: #1d4ed8; margin-top: 30px; }
+        h3 { color: #3b82f6; }
+        code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+        pre { background: #f1f5f9; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        .note { background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .tip { background: #dcfce7; padding: 15px; border-left: 4px solid #22c55e; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        .warning { background: #fee2e2; padding: 15px; border-left: 4px solid #ef4444; margin: 20px 0; border-radius: 0 8px 8px 0; }
+        a { color: #2563eb; }
+        ul, ol { padding-left: 25px; }
+        li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ SandiRaksa User Guide</h1>
+    
+    <p>SandiRaksa is a desktop application for protecting sensitive data before sharing with AI services. All processing is done locally on your computer.</p>
+    
+    <h2>📋 Table of Contents</h2>
+    <ol>
+        <li><a href="#getting-started">Getting Started</a></li>
+        <li><a href="#projects">Managing Projects</a></li>
+        <li><a href="#scanning">Scanning Documents</a></li>
+        <li><a href="#reviewing">Reviewing Findings</a></li>
+        <li><a href="#protecting">Protecting Data</a></li>
+        <li><a href="#restoring">Restoring Data</a></li>
+        <li><a href="#formats">Supported Formats</a></li>
+        <li><a href="#types">Detected Data Types</a></li>
+        <li><a href="#tokens">About Tokens</a></li>
+    </ol>
+    
+    <h2 id="getting-started">🚀 Getting Started</h2>
+    <ol>
+        <li>Create a new project via <strong>File → New Project</strong></li>
+        <li>Name your project and select a privacy profile</li>
+        <li>Add files by drag & drop or click Add Files button</li>
+        <li>Click <strong>Scan All</strong> to detect sensitive data</li>
+        <li>Review findings and choose actions</li>
+        <li>Click <strong>Apply Protection</strong> to generate protected files</li>
+    </ol>
+    
+    <h2 id="projects">📁 Managing Projects</h2>
+    <p>Projects help organize files and maintain token consistency across scans.</p>
+    
+    <h3>Creating a Project</h3>
+    <ol>
+        <li>Click <strong>File → New Project</strong> or the <strong>+</strong> button</li>
+        <li>Enter a project name</li>
+        <li>Select an appropriate privacy profile</li>
+        <li>Click <strong>Save</strong></li>
+    </ol>
+    
+    <div class="tip">
+        <strong>💡 Tip:</strong> Use separate projects for different contexts (e.g., project A for HR, project B for finance) to keep tokens isolated.
+    </div>
+    
+    <h2 id="scanning">🔍 Scanning Documents</h2>
+    <p>Scanning detects sensitive data using:</p>
+    <ul>
+        <li>Regex patterns for Indonesian formats (NIK, NPWP, phone numbers)</li>
+        <li>Named Entity Recognition for person and organization names</li>
+        <li>Custom rules you define</li>
+    </ul>
+    
+    <h2 id="reviewing">👁️ Reviewing Findings</h2>
+    <p>After scanning, you can review each finding:</p>
+    
+    <ul>
+        <li><strong>Protect</strong> - Replace with token (default)</li>
+        <li><strong>Ignore</strong> - Leave as-is</li>
+        <li><strong>Change Type</strong> - Correct the entity type</li>
+    </ul>
+    
+    <h2 id="protecting">🔒 Protecting Data</h2>
+    <p>Protection replaces sensitive data with deterministic tokens.</p>
+    
+    <h3>Example</h3>
+    <pre>
+Before: John Doe works at ABC Corp with email john@abc.com
+After:  [[PERSON_7F31A2]] works at [[ORG_B4C9E1]] with email [[EMAIL_3D2F1C]]</pre>
+    
+    <h2 id="restoring">🔄 Restoring Data</h2>
+    <p>After receiving output from AI, you can restore original data:</p>
+    
+    <ol>
+        <li>Open the <strong>Restore</strong> menu</li>
+        <li>Paste text containing tokens</li>
+        <li>Click <strong>Restore</strong></li>
+        <li>Copy the restored result</li>
+    </ol>
+    
+    <div class="warning">
+        <strong>⚠️ Important:</strong> Restoration only works for tokens from the same project. Do not mix tokens from different projects.
+    </div>
+    
+    <h2 id="formats">📄 Supported Formats</h2>
+    <table>
+        <tr><th>Format</th><th>Extension</th><th>Features</th></tr>
+        <tr><td>CSV</td><td>.csv</td><td>Auto encoding detection, header preservation</td></tr>
+        <tr><td>Excel</td><td>.xlsx, .xls</td><td>Multiple sheets, formula preservation</td></tr>
+        <tr><td>Word</td><td>.docx, .doc</td><td>Paragraphs, tables, headers/footers, comments</td></tr>
+        <tr><td>PowerPoint</td><td>.pptx, .ppt</td><td>Slides, shapes, notes</td></tr>
+    </table>
+    
+    <h2 id="types">🏷️ Detected Data Types</h2>
+    
+    <h3>Indonesian Data</h3>
+    <ul>
+        <li><strong>ID_NIK</strong> - Indonesian National ID Number (16 digits)</li>
+        <li><strong>ID_NPWP</strong> - Tax ID Number</li>
+        <li><strong>ID_KK</strong> - Family Card Number</li>
+        <li><strong>ID_PHONE</strong> - Indonesian phone numbers</li>
+    </ul>
+    
+    <h3>International Data</h3>
+    <ul>
+        <li><strong>PERSON</strong> - Person names</li>
+        <li><strong>EMAIL</strong> - Email addresses</li>
+        <li><strong>PHONE</strong> - General phone numbers</li>
+        <li><strong>ADDRESS</strong> - Addresses</li>
+        <li><strong>ORGANIZATION</strong> - Organization names</li>
+        <li><strong>CREDIT_CARD</strong> - Credit card numbers</li>
+        <li><strong>BANK_ACCOUNT</strong> - Bank account numbers</li>
+        <li><strong>IP_ADDRESS</strong> - IP addresses</li>
+    </ul>
+    
+    <h2 id="tokens">🎫 About Tokens</h2>
+    
+    <p>Tokens are placeholders that replace sensitive data. Format: <code>[[TYPE_HEXID]]</code></p>
+    
+    <h3>Token Characteristics</h3>
+    <ul>
+        <li><strong>Deterministic</strong> - Same value always produces the same token</li>
+        <li><strong>Project-unique</strong> - Different tokens across projects</li>
+        <li><strong>Non-guessable</strong> - ID uses HMAC, not sequential numbers</li>
+        <li><strong>Reversible</strong> - Can be restored to original value</li>
+    </ul>
+    
+    <hr>
+    <p><small>SandiRaksa v0.1.0 • All processing is done locally</small></p>
+</body>
+</html>
