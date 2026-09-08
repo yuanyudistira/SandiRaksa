@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SandiRaksa - Lindungi Data Sebelum Berbagi ke AI</title>
+    <meta name="description" content="SandiRaksa adalah aplikasi desktop yang melindungi data sensitif dalam dokumen sebelum dibagikan ke AI seperti ChatGPT, Claude, atau Gemini. 100% lokal, aman, dan reversibel.">
+    <meta name="keywords" content="privacy, PII, data protection, AI safety, Indonesia, NIK, NPWP, ChatGPT, Claude">
+    <meta name="author" content="Yuan Yudistira">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="SandiRaksa - Local Privacy Gateway for AI">
+    <meta property="og:description" content="Lindungi data sensitif sebelum berbagi ke AI. 100% lokal, aman, reversibel.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://sandiraksa.infosecguru.id">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+    
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #10b981;
+            --dark: #1e293b;
+            --gray: #64748b;
+            --light: #f8fafc;
+            --white: #ffffff;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: var(--dark);
+            background: var(--light);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* Header */
+        header {
+            background: var(--white);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            position: fixed;
+            width: 100%;
+            top: 0;
+            z-index: 100;
+        }
+        
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 30px;
+            list-style: none;
+        }
+        
+        .nav-links a {
+            text-decoration: none;
+            color: var(--gray);
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+        
+        /* Hero */
+        .hero {
+            padding: 140px 0 80px;
+            text-align: center;
+            background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+        }
+        
+        .hero h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            color: var(--dark);
+        }
+        
+        .hero h1 span {
+            color: var(--primary);
+        }
+        
+        .hero .tagline {
+            font-size: 1.5rem;
+            color: var(--gray);
+            margin-bottom: 15px;
+        }
+        
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--gray);
+            max-width: 600px;
+            margin: 0 auto 40px;
+        }
+        
+        .hero-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: var(--white);
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: var(--white);
+            color: var(--dark);
+            border: 2px solid #e2e8f0;
+        }
+        
+        .btn-secondary:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        
+        /* Features */
+        .features {
+            padding: 80px 0;
+            background: var(--white);
+        }
+        
+        .section-title {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 50px;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+        }
+        
+        .feature-card {
+            padding: 30px;
+            border-radius: 12px;
+            background: var(--light);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+        
+        .feature-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+            color: var(--dark);
+        }
+        
+        .feature-card p {
+            color: var(--gray);
+            font-size: 0.95rem;
+        }
+        
+        /* How it works */
+        .how-it-works {
+            padding: 80px 0;
+            background: var(--light);
+        }
+        
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+        
+        .step {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .step-number {
+            width: 50px;
+            height: 50px;
+            background: var(--primary);
+            color: var(--white);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0 auto 20px;
+        }
+        
+        .step h3 {
+            margin-bottom: 10px;
+        }
+        
+        .step p {
+            color: var(--gray);
+            font-size: 0.95rem;
+        }
+        
+        /* Formats */
+        .formats {
+            padding: 80px 0;
+            background: var(--white);
+        }
+        
+        .format-grid {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            margin-top: 40px;
+        }
+        
+        .format-item {
+            text-align: center;
+            padding: 20px 30px;
+            border-radius: 12px;
+            background: var(--light);
+        }
+        
+        .format-icon {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+        
+        .format-item span {
+            display: block;
+            font-weight: 600;
+            color: var(--dark);
+        }
+        
+        /* Download */
+        .download {
+            padding: 80px 0;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: var(--white);
+            text-align: center;
+        }
+        
+        .download h2 {
+            font-size: 2rem;
+            margin-bottom: 15px;
+        }
+        
+        .download p {
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        
+        .download-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .download .btn {
+            background: var(--white);
+            color: var(--primary);
+        }
+        
+        .download .btn:hover {
+            background: var(--light);
+            transform: translateY(-2px);
+        }
+        
+        /* Footer */
+        footer {
+            padding: 40px 0;
+            background: var(--dark);
+            color: var(--white);
+            text-align: center;
+        }
+        
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .footer-links a {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        
+        .footer-links a:hover {
+            color: var(--white);
+        }
+        
+        .copyright {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
+            }
+            
+            .hero .tagline {
+                font-size: 1.2rem;
+            }
+            
+            .nav-links {
+                display: none;
+            }
+            
+            .section-title {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="container">
+            <nav>
+                <a href="#" class="logo">🛡️ SandiRaksa</a>
+                <ul class="nav-links">
+                    <li><a href="#features">Fitur</a></li>
+                    <li><a href="#how-it-works">Cara Kerja</a></li>
+                    <li><a href="#download">Download</a></li>
+                    <li><a href="https://github.com/yuanyudistira/sandiraksa" target="_blank">GitHub</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="container">
+            <h1>🛡️ <span>SandiRaksa</span></h1>
+            <p class="tagline">Lindungi Data Sebelum Berbagi ke AI</p>
+            <p class="subtitle">
+                Aplikasi desktop yang melindungi data sensitif dalam dokumen sebelum 
+                dibagikan ke ChatGPT, Claude, Gemini, dan AI lainnya. 
+                <strong>100% lokal</strong>, aman, dan reversibel.
+            </p>
+            <div class="hero-buttons">
+                <a href="https://github.com/yuanyudistira/sandiraksa/releases/latest" class="btn btn-primary">
+                    ⬇️ Download Gratis
+                </a>
+                <a href="https://github.com/yuanyudistira/sandiraksa" class="btn btn-secondary" target="_blank">
+                    📖 Lihat di GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features" id="features">
+        <div class="container">
+            <h2 class="section-title">✨ Fitur Utama</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>100% Lokal</h3>
+                    <p>Semua pemrosesan dilakukan di komputer Anda. Data tidak pernah dikirim ke server manapun.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔄</div>
+                    <h3>Reversibel</h3>
+                    <p>Token bisa dikembalikan ke data asli setelah Anda menerima hasil dari AI.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🇮🇩</div>
+                    <h3>Dukungan Indonesia</h3>
+                    <p>Deteksi NIK, NPWP, No. KK, nomor telepon Indonesia, dan PII lokal lainnya.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📄</div>
+                    <h3>Multi-Format</h3>
+                    <p>Dukung Excel, CSV, Word, PowerPoint, dan file teks.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Enkripsi Kuat</h3>
+                    <p>Pemetaan token dilindungi dengan enkripsi AES-256-GCM.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Konsisten</h3>
+                    <p>Data yang sama selalu menghasilkan token yang sama dalam satu proyek.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="container">
+            <h2 class="section-title">🚀 Cara Kerja</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Upload Dokumen</h3>
+                    <p>Drag & drop file Excel, CSV, Word, atau PowerPoint ke SandiRaksa.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Pilih Data Sensitif</h3>
+                    <p>Pilih kolom atau data yang berisi informasi sensitif untuk dilindungi.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Proteksi</h3>
+                    <p>Data sensitif diganti dengan token unik seperti [[PERSON_A1B2C3]].</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3>Bagikan ke AI</h3>
+                    <p>Gunakan file terproteksi untuk ChatGPT, Claude, atau AI lainnya dengan aman.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Formats -->
+    <section class="formats">
+        <div class="container">
+            <h2 class="section-title">📦 Format yang Didukung</h2>
+            <div class="format-grid">
+                <div class="format-item">
+                    <div class="format-icon">📊</div>
+                    <span>Excel (.xlsx)</span>
+                </div>
+                <div class="format-item">
+                    <div class="format-icon">📋</div>
+                    <span>CSV</span>
+                </div>
+                <div class="format-item">
+                    <div class="format-icon">📝</div>
+                    <span>Word (.docx)</span>
+                </div>
+                <div class="format-item">
+                    <div class="format-icon">📽️</div>
+                    <span>PowerPoint (.pptx)</span>
+                </div>
+                <div class="format-item">
+                    <div class="format-icon">📄</div>
+                    <span>Text (.txt)</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Download -->
+    <section class="download" id="download">
+        <div class="container">
+            <h2>⬇️ Download SandiRaksa</h2>
+            <p>Gratis dan open source. Tersedia untuk Windows dan macOS.</p>
+            <div class="download-buttons">
+                <a href="https://github.com/yuanyudistira/sandiraksa/releases/latest/download/SandiRaksa-0.2.0-windows-x64.exe" class="btn">
+                    🪟 Windows
+                </a>
+                <a href="https://github.com/yuanyudistira/sandiraksa/releases/latest/download/SandiRaksa-0.2.0-macos-arm64.dmg" class="btn">
+                    🍎 macOS (Apple Silicon)
+                </a>
+                <a href="https://github.com/yuanyudistira/sandiraksa/releases/latest/download/SandiRaksa-0.2.0-macos-x64.dmg" class="btn">
+                    🍎 macOS (Intel)
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-links">
+                <a href="https://github.com/yuanyudistira/sandiraksa" target="_blank">GitHub</a>
+                <a href="https://github.com/yuanyudistira/sandiraksa/releases" target="_blank">Releases</a>
+                <a href="https://github.com/yuanyudistira/sandiraksa/issues" target="_blank">Report Bug</a>
+                <a href="mailto:infosecguru.id@gmail.com">Kontak</a>
+            </div>
+            <p class="copyright">
+                © 2024 Yuan Yudistira. MIT License.<br>
+                SandiRaksa - Local Privacy Gateway for AI
+            </p>
+        </div>
+    </footer>
+</body>
+</html>
