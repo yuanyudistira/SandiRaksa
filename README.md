@@ -29,18 +29,27 @@ SandiRaksa adalah aplikasi desktop standalone yang melindungi informasi sensitif
 ### Windows
 
 Download installer dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
-- `SandiRaksa-Setup-x64.exe`
+- `SandiRaksa-0.2.0-windows-x64.exe`
 
 ### macOS
 
-Download DMG:
-- Apple Silicon: `SandiRaksa-macOS-arm64.dmg`
-- Intel: `SandiRaksa-macOS-x64.dmg`
+Download DMG dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
+- Apple Silicon (M1/M2/M3): `SandiRaksa-0.2.0-macos-arm64.dmg`
+- Intel: `SandiRaksa-0.2.0-macos-x64.dmg`
 
-### Linux
+## 🧪 File Contoh untuk Testing
 
-Download AppImage:
-- `SandiRaksa-x86_64.AppImage`
+Folder [`example_file/`](example_file/) berisi file mockup untuk mencoba SandiRaksa:
+
+| File | Format | Deskripsi |
+|------|--------|-----------|
+| `Data export CSV.csv` | CSV | Data tabular dengan kolom PII |
+| `Data_Pasien_dan_EMR_3000.xlsx` | Excel | Mockup data pasien 3000 baris |
+| `Mockup_Data_Sensitif_Pasien.docx` | Word | Dokumen dengan data sensitif |
+| `Mockup_Data_Sensitif_Pasien 1.pptx` | PowerPoint | Presentasi dengan PII |
+| `Mockup_Data_Sensitif_Pasien.txt` | Text | File teks dengan data PII |
+
+> ⚠️ Semua data dalam file contoh adalah **100% fiktif** untuk keperluan demo.
 
 ## 🔧 Development
 
@@ -154,7 +163,9 @@ SandiRaksa/
 
 ## 📝 Lisensi
 
-Proprietary - Hak Cipta © 2024 SandiRaksa Team
+MIT License - Lihat [LICENSE](LICENSE) untuk detail.
+
+Copyright (c) 2024 Yuan Yudistira
 
 ## 🤝 Kontribusi
 
