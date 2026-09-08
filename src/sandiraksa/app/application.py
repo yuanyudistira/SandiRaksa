@@ -6,10 +6,20 @@ This module contains the Qt application setup and lifecycle management.
 
 from __future__ import annotations
 
-import faulthandler
 import gc
+import io
+import os
 import sys
 from typing import TYPE_CHECKING
+
+# Fix for PyInstaller --noconsole mode: sys.stdout/stderr may be None
+# This must be done BEFORE importing any module that uses logging or faulthandler
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = io.StringIO()
+
+import faulthandler
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
@@ -19,8 +29,12 @@ from sandiraksa.version import __version__
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-# Enable faulthandler for better crash debugging
-faulthandler.enable()
+# Enable faulthandler for better crash debugging (only if stderr is real)
+if hasattr(sys.stderr, 'fileno'):
+    try:
+        faulthandler.enable()
+    except (AttributeError, io.UnsupportedOperation):
+        pass  # Skip if running in --noconsole mode
 
 # Disable automatic garbage collection to prevent heap corruption with PySide6
 # GC will be triggered manually during idle periods
