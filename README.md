@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/sandiraksa-header.png" alt="SandiRaksa" width="600">
+</p>
+
 # SandiRaksa
 
 **Local Privacy Gateway for AI**
