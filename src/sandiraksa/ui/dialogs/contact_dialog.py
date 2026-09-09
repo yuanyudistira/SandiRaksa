@@ -30,7 +30,7 @@ class ContactDialog(QDialog):
     def _setup_ui(self) -> None:
         """Setup the UI layout."""
         self.setWindowTitle("Hubungi Kami")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 220)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(SPACING.LG)
@@ -49,7 +49,7 @@ class ContactDialog(QDialog):
         # Description
         desc = QLabel(
             "Punya pertanyaan, saran, atau menemukan bug?\n"
-            "Jangan ragu untuk menghubungi kami."
+            "Hubungi kami melalui GitHub."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet(f"color: {ColorPalette.GRAY_600.value};")
@@ -57,19 +57,6 @@ class ContactDialog(QDialog):
         layout.addWidget(desc)
 
         layout.addSpacing(SPACING.MD)
-
-        # Email button
-        email_btn = QPushButton("📧 Email: infosecguru.id@gmail.com")
-        email_btn.setStyleSheet(
-            f"padding: {SPACING.MD}px; "
-            f"font-size: {FONT_SIZE.MD}px; "
-            f"text-align: left;"
-        )
-        email_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        email_btn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl("mailto:infosecguru.id@gmail.com"))
-        )
-        layout.addWidget(email_btn)
 
         # GitHub button
         github_btn = QPushButton("🐙 GitHub: github.com/yuanyudistira/sandiraksa")
@@ -83,19 +70,6 @@ class ContactDialog(QDialog):
             lambda: QDesktopServices.openUrl(QUrl("https://github.com/yuanyudistira/sandiraksa"))
         )
         layout.addWidget(github_btn)
-
-        # Website button
-        website_btn = QPushButton("🌐 Website: sandiraksa.infosecguru.id")
-        website_btn.setStyleSheet(
-            f"padding: {SPACING.MD}px; "
-            f"font-size: {FONT_SIZE.MD}px; "
-            f"text-align: left;"
-        )
-        website_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        website_btn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl("https://sandiraksa.infosecguru.id"))
-        )
-        layout.addWidget(website_btn)
 
         layout.addStretch()
 

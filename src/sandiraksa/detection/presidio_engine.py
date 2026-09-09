@@ -272,7 +272,7 @@ class PresidioDetectionEngine(DetectionEngine):
         self._presidio_recognizer: PresidioRecognizer | None = None
 
     def initialize(self) -> None:
-        """Initialize the engine with Presidio recognizer."""
+        """Initialize the engine with Presidio recognizer + Indonesian recognizers."""
         if self._include_standard:
             # Create and register Presidio recognizer
             self._presidio_recognizer = PresidioRecognizer(
@@ -280,8 +280,29 @@ class PresidioDetectionEngine(DetectionEngine):
             )
             self._registry.register(self._presidio_recognizer)
 
+        # Register Indonesian-specific recognizers
+        self._register_indonesian_recognizers()
+
         self._initialized = True
         logger.info("Presidio detection engine initialized")
+
+    def _register_indonesian_recognizers(self) -> None:
+        """Register Indonesian ID and context-aware recognizers."""
+        try:
+            from sandiraksa.detection.recognizers.id_nik import NIKRecognizer
+            from sandiraksa.detection.recognizers.id_dob import DateOfBirthRecognizer
+            from sandiraksa.detection.recognizers.id_person import (
+                IndonesianPersonRecognizer,
+            )
+
+            self._registry.register(NIKRecognizer())
+            self._registry.register(DateOfBirthRecognizer())
+            self._registry.register(IndonesianPersonRecognizer())
+            logger.info(
+                "Registered Indonesian recognizers (NIK, DateOfBirth, Person)"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to register some Indonesian recognizers: {e}")
 
     def add_custom_recognizer(self, recognizer: BaseRecognizer) -> None:
         """Add a custom recognizer to the engine."""

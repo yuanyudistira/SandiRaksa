@@ -71,14 +71,12 @@ class CSVCell:
     value: str
     raw_value: str  # Original value before any processing
 
-    def to_location(self) -> DocumentLocation:
+    def to_location(self, file_id: str = "") -> DocumentLocation:
         """Convert to a DocumentLocation."""
         return DocumentLocation(
-            element_type="cell",
-            element_id=f"R{self.row + 1}C{self.column + 1}",
-            row_number=self.row,
-            column_number=self.column,
-            column_name=self.column_name,
+            file_id=file_id,
+            component_type="cell",
+            cell_address=f"R{self.row + 1}C{self.column + 1}",
         )
 
 

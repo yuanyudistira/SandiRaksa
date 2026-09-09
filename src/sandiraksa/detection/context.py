@@ -130,7 +130,7 @@ class DetectionConfig:
     enabled_entity_types: set[str] = field(default_factory=set)
 
     # Minimum confidence threshold
-    min_confidence: float = 0.7
+    min_confidence: float = 0.5
 
     # Whether to use context enhancement
     use_context: bool = True

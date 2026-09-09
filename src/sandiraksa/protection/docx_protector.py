@@ -20,6 +20,18 @@ from sandiraksa.protection.tokenizer import Tokenizer, TokenizerFactory
 logger = logging.getLogger(__name__)
 
 
+# Matches dates like "14-Feb-1988", "14/02/1988", "1988-02-14"
+_DATE_HINT = re.compile(
+    r"\d{1,2}[\s\-/][A-Za-z0-9]{1,9}[\s\-/]\d{2,4}"
+    r"|\d{4}[\-/]\d{1,2}[\-/]\d{1,2}"
+)
+
+
+def _looks_like_date(text: str) -> bool:
+    """Quick check that a value resembles a date."""
+    return bool(_DATE_HINT.search(text.strip()))
+
+
 @dataclass
 class DetectedEntity:
     """A detected PII entity in document."""
@@ -125,14 +137,25 @@ class DocxProtector:
                     para_entities = self._detect_in_text(text, "paragraph")
                     entities.extend(para_entities)
             
-            # Scan tables
+            # Scan tables with header context. The first row is treated as the
+            # header row; each cell value is classified using its column header
+            # (e.g. header "Nama Mock" -> the value is a PERSON; header
+            # "Tanggal Lahir" -> the value is a DATE_OF_BIRTH).
             for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
+                rows = list(table.rows)
+                if not rows:
+                    continue
+
+                headers = [c.text.strip() for c in rows[0].cells]
+
+                for row in rows[1:]:
+                    for col_idx, cell in enumerate(row.cells):
                         text = cell.text
-                        if text.strip():
-                            cell_entities = self._detect_in_text(text, "table")
-                            entities.extend(cell_entities)
+                        if not text.strip():
+                            continue
+                        header = headers[col_idx] if col_idx < len(headers) else ""
+                        cell_entities = self._detect_in_cell(text, header)
+                        entities.extend(cell_entities)
             
             # Scan headers
             for section in doc.sections:
@@ -165,6 +188,48 @@ class DocxProtector:
         finally:
             if gc_was_enabled:
                 gc.enable()
+
+    def _detect_in_cell(self, text: str, header: str) -> list[DetectedEntity]:
+        """
+        Detect entities in a table cell using the column header as context.
+
+        If the header maps to a sensitive entity type (e.g. "Nama Mock" ->
+        PERSON, "Tanggal Lahir" -> DATE_OF_BIRTH), the whole cell value is
+        treated as that entity. Otherwise, fall back to regex-based detection.
+        """
+        text = text.strip()
+        if not text:
+            return []
+
+        from sandiraksa.detection.recognizers.context_classifier import (
+            classify_label,
+        )
+
+        entity_type = classify_label(header) if header else None
+
+        if entity_type:
+            # Respect entity_types filter if configured
+            if self._entity_types and entity_type not in self._entity_types:
+                return []
+
+            # For date-of-birth columns, ensure the value looks like a date
+            if entity_type == "DATE_OF_BIRTH" and not _looks_like_date(text):
+                return []
+
+            # For NIK/NPWP etc. that already have their own regex, still let the
+            # regex detectors handle the exact value below; but for PERSON and
+            # DATE_OF_BIRTH the whole cell is the value.
+            if entity_type in ("PERSON", "DATE_OF_BIRTH", "LOCATION"):
+                return [DetectedEntity(
+                    entity_type=entity_type,
+                    value=text,
+                    location="table",
+                    context=f"{header}: {text}",
+                    confidence=0.9,
+                )]
+
+        # Fall back to regex detection for the cell content
+        return self._detect_in_text(text, "table")
     
     def _detect_in_text(self, text: str, location: str) -> list[DetectedEntity]:
         """Detect entities in a text string."""
@@ -206,8 +271,62 @@ class DocxProtector:
                     location=location,
                     context=f"...{context}...",
                 ))
-        
+
+        # Context-aware recognizers for names and birth dates in narrative text
+        entities.extend(self._detect_context_aware(text, location))
+
+        # Global user-defined custom patterns (e.g. hospital MR numbers)
+        entities.extend(self._detect_custom_patterns(text, location))
+
         return entities
+
+    def _detect_custom_patterns(self, text: str, location: str) -> list[DetectedEntity]:
+        """Detect matches from global user-defined custom patterns."""
+        found: list[DetectedEntity] = []
+        try:
+            from sandiraksa.detection.custom_patterns import find_custom_matches
+
+            for m in find_custom_matches(text):
+                found.append(DetectedEntity(
+                    entity_type=m.label,
+                    value=m.value,
+                    location=location,
+                    context=text[:60],
+                    confidence=0.95,
+                ))
+        except Exception as e:
+            logger.warning(f"Custom pattern detection failed: {e}")
+        return found
+
+    def _detect_context_aware(self, text: str, location: str) -> list[DetectedEntity]:
+        """Use context-aware recognizers for PERSON and DATE_OF_BIRTH."""
+        found: list[DetectedEntity] = []
+        try:
+            from sandiraksa.detection.recognizers.id_person import (
+                IndonesianPersonRecognizer,
+            )
+            from sandiraksa.detection.recognizers.id_dob import (
+                DateOfBirthRecognizer,
+            )
+
+            recognizers = []
+            if not self._entity_types or "PERSON" in self._entity_types:
+                recognizers.append(IndonesianPersonRecognizer())
+            if not self._entity_types or "DATE_OF_BIRTH" in self._entity_types:
+                recognizers.append(DateOfBirthRecognizer())
+
+            for rec in recognizers:
+                for r in rec.analyze(text, rec.supported_entities):
+                    found.append(DetectedEntity(
+                        entity_type=r.entity_type,
+                        value=r.text,
+                        location=location,
+                        context=text[:60],
+                        confidence=r.score,
+                    ))
+        except Exception as e:
+            logger.warning(f"Context-aware detection failed: {e}")
+        return found
     
     def protect_file(
         self,

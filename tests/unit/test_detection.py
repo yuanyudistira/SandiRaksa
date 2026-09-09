@@ -326,9 +326,10 @@ class TestDetectionEngine:
         segment = TextSegment(
             text="test@example.com",
             location=DocumentLocation(
-                element_type="cell",
-                element_id="A1",
-                worksheet_name="Sheet1",
+                file_id="file1",
+                component_type="cell",
+                sheet_name="Sheet1",
+                cell_address="A1",
             ),
             parent_offset=0,
         )
@@ -337,6 +338,6 @@ class TestDetectionEngine:
         
         assert len(results) == 1
         assert results[0].document_location is not None
-        assert results[0].document_location.element_type == "cell"
+        assert results[0].document_location.component_type == "cell"
         
         engine.shutdown()

@@ -118,9 +118,21 @@ DATE_TIME = EntityType(
     display_name="Date/Time",
     display_name_id="Tanggal/Waktu",
     category=EntityCategory.PERSONAL,
-    description="Dates and times",
-    description_id="Tanggal dan waktu",
-    default_enabled=False,  # Often too noisy
+    description="Dates and times (generic)",
+    description_id="Tanggal dan waktu (umum)",
+    default_enabled=False,  # Generic dates are noisy; use DATE_OF_BIRTH instead
+)
+
+DATE_OF_BIRTH = EntityType(
+    name="DATE_OF_BIRTH",
+    display_name="Date of Birth",
+    display_name_id="Tanggal Lahir",
+    category=EntityCategory.PERSONAL,
+    description="Birth dates detected via context (labels or nearby names)",
+    description_id="Tanggal lahir yang terdeteksi lewat konteks (label atau nama di dekatnya)",
+    default_enabled=True,
+    min_confidence=0.5,
+    requires_recognizer=True,
 )
 
 LOCATION = EntityType(
@@ -312,6 +324,7 @@ class EntityTypeRegistry:
         IBAN_CODE,
         IP_ADDRESS,
         DATE_TIME,
+        DATE_OF_BIRTH,
         LOCATION,
         NRP,
         MEDICAL_LICENSE,

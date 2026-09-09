@@ -97,8 +97,14 @@ class TxtProtector:
         """
         self._project_id = project_id
         self._tokenizer = tokenizer or TokenizerFactory.get_tokenizer(project_id)
-        # Combine standard and context pattern entity types
-        all_types = list(self.PATTERNS.keys()) + list(self.CONTEXT_PATTERNS.keys())
+        # Combine standard and context pattern entity types.
+        # PERSON comes from context recognizers; DATE_OF_BIRTH is handled by the
+        # context-aware date recognizer (context-gated, avoids visit dates).
+        all_types = (
+            list(self.PATTERNS.keys())
+            + list(self.CONTEXT_PATTERNS.keys())
+            + ["DATE_OF_BIRTH"]
+        )
         self._entity_types = entity_types or all_types
     
     def detect_entities(self, text: str) -> list[DetectedEntity]:
@@ -156,11 +162,80 @@ class TxtProtector:
             except re.error as e:
                 logger.warning(f"Invalid context pattern for {entity_type}: {e}")
         
+        # Context-aware recognizers for names and birth dates (handles patterns
+        # the regex above misses, e.g. EMR-style rows "[EMR-XXX] Nama | ...").
+        entities.extend(self._detect_context_aware(text))
+
+        # Global user-defined custom patterns (e.g. hospital MR numbers)
+        entities.extend(self._detect_custom_patterns(text))
+
         # Sort by position (start offset)
         entities.sort(key=lambda e: e.start)
         
         # Remove overlapping entities (keep longer match)
         return self._remove_overlaps(entities)
+
+    def _detect_custom_patterns(self, text: str) -> list[DetectedEntity]:
+        """Detect matches from global user-defined custom patterns."""
+        found: list[DetectedEntity] = []
+        try:
+            from sandiraksa.detection.custom_patterns import find_custom_matches
+
+            for m in find_custom_matches(text):
+                found.append(DetectedEntity(
+                    entity_type=m.label,
+                    value=m.value,
+                    start=m.start,
+                    end=m.end,
+                    confidence=0.95,
+                ))
+        except Exception as e:
+            logger.warning(f"Custom pattern detection failed: {e}")
+        return found
+
+    def _detect_context_aware(self, text: str) -> list[DetectedEntity]:
+        """
+        Use context-aware recognizers for PERSON and DATE_OF_BIRTH.
+
+        These recognizers understand Indonesian document structure (labels,
+        EMR rows) and reject common false positives, complementing the plain
+        regex patterns above.
+        """
+        found: list[DetectedEntity] = []
+        try:
+            from sandiraksa.detection.recognizers.id_person import (
+                IndonesianPersonRecognizer,
+            )
+            from sandiraksa.detection.recognizers.id_dob import (
+                DateOfBirthRecognizer,
+            )
+            from sandiraksa.detection.recognizers.person_filter import (
+                is_false_positive_person,
+            )
+
+            recognizers = []
+            if "PERSON" in self._entity_types:
+                recognizers.append(IndonesianPersonRecognizer())
+            # DATE_OF_BIRTH detection is opt-in via entity_types; if the caller
+            # detects all types, include it too.
+            if "DATE_OF_BIRTH" in self._entity_types:
+                recognizers.append(DateOfBirthRecognizer())
+
+            for rec in recognizers:
+                for r in rec.analyze(text, rec.supported_entities):
+                    # Extra guard against false-positive names
+                    if r.entity_type == "PERSON" and is_false_positive_person(r.text):
+                        continue
+                    found.append(DetectedEntity(
+                        entity_type=r.entity_type,
+                        value=r.text,
+                        start=r.start,
+                        end=r.end,
+                        confidence=r.score,
+                    ))
+        except Exception as e:
+            logger.warning(f"Context-aware detection failed: {e}")
+        return found
     
     def _validate_entity(self, entity_type: str, value: str) -> bool:
         """Validate a detected entity value."""
@@ -209,8 +284,31 @@ class TxtProtector:
         
         return True
     
+    # Priority for resolving overlaps (higher = preferred). More specific
+    # entity types win over generic ones (DATE_OF_BIRTH over DATE).
+    _ENTITY_PRIORITY = {
+        "DATE_OF_BIRTH": 10,
+        "ID_NIK": 9,
+        "ID_NPWP": 9,
+        "ID_KK": 9,
+        "CREDIT_CARD": 8,
+        "EMAIL": 8,
+        "PHONE_NUMBER": 7,
+        "PERSON": 6,
+        "DATE": 2,
+    }
+
+    def _priority(self, entity: DetectedEntity) -> int:
+        return self._ENTITY_PRIORITY.get(entity.entity_type, 5)
+
     def _remove_overlaps(self, entities: list[DetectedEntity]) -> list[DetectedEntity]:
-        """Remove overlapping entities, keeping longer matches."""
+        """
+        Remove overlapping entities.
+
+        Resolution order:
+        1. Higher entity-type priority wins (DATE_OF_BIRTH over generic DATE).
+        2. Then longer match wins.
+        """
         if not entities:
             return []
         
@@ -219,9 +317,14 @@ class TxtProtector:
         for entity in entities:
             # Check if overlaps with last added entity
             if result and entity.start < result[-1].end:
-                # Keep the longer one
-                if (entity.end - entity.start) > (result[-1].end - result[-1].start):
+                prev = result[-1]
+                # Prefer higher priority
+                if self._priority(entity) > self._priority(prev):
                     result[-1] = entity
+                elif self._priority(entity) == self._priority(prev):
+                    # Same priority -> keep the longer match
+                    if (entity.end - entity.start) > (prev.end - prev.start):
+                        result[-1] = entity
             else:
                 result.append(entity)
         

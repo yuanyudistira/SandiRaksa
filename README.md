@@ -14,33 +14,55 @@ SandiRaksa adalah aplikasi desktop standalone yang melindungi informasi sensitif
 
 - 🔒 **100% Lokal** — Semua pemrosesan dilakukan di komputer Anda
 - 🔄 **Perlindungan Reversibel** — Kembalikan data asli setelah menerima hasil dari AI
-- 🇮🇩 **Dukungan Indonesia** — Deteksi NIK, NPWP, No. KK, dan data Indonesia lainnya
-- 📄 **Multi-Format** — Dukung CSV, Excel, Word, PowerPoint
+- 🇮🇩 **Dukungan Indonesia** — Deteksi NIK, NPWP, No. KK, BPJS, dan data Indonesia lainnya
+- 📄 **Multi-Format** — Dukung CSV, Excel, Word, PowerPoint, TXT
 - 🛡️ **Aman** — Enkripsi AES-256-GCM untuk pemetaan reversibel
+- 🎯 **Akurasi Tinggi** — F1 Score ≥95% untuk NIK dan Email, ≥90% untuk NPWP
+- 🧠 **Deteksi Nama Kontekstual** — Mengenali nama orang dari label, pola EMR, dan header kolom
+- 📅 **Tanggal Lahir Cerdas** — Membedakan tanggal lahir dari tanggal kunjungan/janji temu
+- 🧩 **Pola Kustom Global** — Definisikan pola sendiri (mis. format Rekam Medis tiap RS) untuk semua project
+- 📊 **Rekomendasi Kolom Otomatis** — Kolom sensitif di Excel/CSV direkomendasikan dari nama header dan isi kolom
 
 ## 📦 Format yang Didukung
 
 | Format | Ekstensi | Status |
 |--------|----------|--------|
-| CSV | `.csv` | ✅ MVP |
-| Excel | `.xlsx` | ✅ MVP |
-| Word | `.docx` | ✅ MVP |
-| PowerPoint | `.pptx` | ✅ MVP |
+| CSV | `.csv` | ✅ Stable |
+| Excel | `.xlsx` | ✅ Stable |
+| Word | `.docx` | ✅ Stable |
+| PowerPoint | `.pptx` | ✅ Stable |
+| TXT | `.txt` | ✅ Stable |
 | PDF | `.pdf` | 🔮 Future |
+
+## 🎯 Entitas yang Dideteksi
+
+| Entitas | Deskripsi | Akurasi Target |
+|---------|-----------|----------------|
+| NIK | Nomor Induk Kependudukan (16 digit) | ≥95% F1 |
+| NPWP | Nomor Pokok Wajib Pajak | ≥90% F1 |
+| KK | Nomor Kartu Keluarga | ≥90% F1 |
+| BPJS | Nomor BPJS Kesehatan | ≥85% F1 |
+| EMAIL | Alamat email | ≥95% F1 |
+| PHONE | Nomor telepon Indonesia | ≥90% F1 |
+| PERSON | Nama orang (NER) | ≥80% F1 |
+| LOCATION | Lokasi/alamat (NER) | ≥70% F1 |
+| ORGANIZATION | Nama organisasi (NER) | ≥70% F1 |
+| CREDIT_CARD | Nomor kartu kredit | ≥95% F1 |
+| IP_ADDRESS | Alamat IP | ≥95% F1 |
 
 ## 🚀 Instalasi
 
 ### Windows
 
 Download installer dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
-- `SandiRaksa-0.2.0-windows-x64.exe`
+- `SandiRaksa-1.0.0-windows-x64.exe`
 
 > ⚠️ **Windows SmartScreen:** Saat pertama kali run, Windows mungkin menampilkan warning "Windows protected your PC" karena aplikasi belum ditandatangani. Klik **"More info"** → **"Run anyway"** untuk melanjutkan.
 
 ### macOS
 
 Download DMG dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
-- `SandiRaksa-0.2.0-macos-x64.dmg`
+- `SandiRaksa-1.0.0-macos-x64.dmg`
 
 > ⚠️ **macOS Gatekeeper:** macOS mungkin memblokir aplikasi karena belum ditandatangani. Buka **System Preferences → Security & Privacy**, lalu klik **"Open Anyway"**.
 
@@ -143,19 +165,28 @@ Lihat [BUILD.md](BUILD.md) untuk panduan lengkap termasuk Nuitka dan cx_Freeze.
 ```
 SandiRaksa/
 ├── src/sandiraksa/
-│   ├── app/          # Application core
+│   ├── app/          # Application core (commands, events, i18n)
 │   ├── ui/           # PySide6 GUI
-│   ├── domain/       # Domain models
+│   ├── domain/       # Domain models (finding, token, policy)
 │   ├── detection/    # PII detection engine
-│   ├── documents/    # Document handlers
-│   ├── protection/   # Protection pipeline
+│   │   ├── recognizers/  # Indonesian ID recognizers (NIK, NPWP, KK, etc.)
+│   │   ├── ner/          # Named Entity Recognition (ONNX-based)
+│   │   └── confidence/   # Confidence scoring & filtering
+│   ├── documents/    # Document handlers (CSV, XLSX, DOCX, PPTX)
+│   ├── protection/   # Protection pipeline & tokenization
 │   ├── restore/      # Restore pipeline
 │   ├── storage/      # Database & vault
 │   ├── security/     # Crypto & security
 │   ├── profiles/     # Privacy profiles
 │   ├── config/       # Configuration
 │   └── resources/    # Assets & i18n
-├── tests/            # Test suite
+├── tests/
+│   ├── unit/         # Unit tests
+│   ├── integration/  # Integration tests
+│   ├── accuracy/     # Benchmark corpus & metrics
+│   ├── performance/  # Performance benchmarks
+│   ├── compatibility/# Backward compatibility tests
+│   └── security/     # Security tests
 ├── scripts/          # Build scripts
 └── docs/             # Documentation
 ```

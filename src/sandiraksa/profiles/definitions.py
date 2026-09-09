@@ -75,7 +75,7 @@ STANDARD_PROFILE = PrivacyProfile(
         "ID_NIK",
         "ID_NPWP",
     ],
-    min_confidence=0.7,
+    min_confidence=0.5,  # Lowered to catch DATE_TIME (score ~0.6)
 )
 
 # HR & Recruitment Profile
@@ -169,7 +169,7 @@ HEALTHCARE_PROFILE = PrivacyProfile(
         "MEDICAL_RECORD_NUMBER",
         "BPJS_NUMBER",
     ],
-    min_confidence=0.7,
+    min_confidence=0.5,  # Lowered to catch names and birth dates
 )
 
 # Legal & M&A Profile

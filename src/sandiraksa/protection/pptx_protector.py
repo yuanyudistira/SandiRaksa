@@ -20,6 +20,18 @@ from sandiraksa.protection.tokenizer import Tokenizer, TokenizerFactory
 logger = logging.getLogger(__name__)
 
 
+# Matches dates like "14-Feb-1988", "14/02/1988", "1988-02-14"
+_DATE_HINT = re.compile(
+    r"\d{1,2}[\s\-/][A-Za-z0-9]{1,9}[\s\-/]\d{2,4}"
+    r"|\d{4}[\-/]\d{1,2}[\-/]\d{1,2}"
+)
+
+
+def _looks_like_date(text: str) -> bool:
+    """Quick check that a value resembles a date."""
+    return bool(_DATE_HINT.search(text.strip()))
+
+
 @dataclass
 class DetectedEntity:
     """A detected PII entity in presentation."""
@@ -125,6 +137,10 @@ class PptxProtector:
                 for shape in slide.shapes:
                     shape_entities = self._scan_shape(shape, location)
                     entities.extend(shape_entities)
+
+                # Spatial label pass: match value text frames to nearby labels
+                # (e.g. a "NAMA" label above/left of the value shape).
+                entities.extend(self._detect_by_spatial_labels(slide, location))
                 
                 # Scan notes
                 if slide.has_notes_slide:
@@ -153,6 +169,80 @@ class PptxProtector:
             if gc_was_enabled:
                 gc.enable()
     
+    def _detect_by_spatial_labels(self, slide, location: str) -> list[DetectedEntity]:
+        """
+        Detect PERSON / DATE_OF_BIRTH values by matching them to a nearby
+        label shape (a "profile card" layout common in slides).
+
+        For each text shape whose text maps to a known label (e.g. "NAMA",
+        "TANGGAL LAHIR"), find the closest text shape below or to the right and
+        treat its content as the labeled entity value.
+        """
+        from sandiraksa.detection.recognizers.context_classifier import (
+            classify_label,
+        )
+
+        found: list[DetectedEntity] = []
+
+        # Collect simple text shapes with positions
+        shapes = []
+        for shape in slide.shapes:
+            try:
+                if not shape.has_text_frame:
+                    continue
+                text = shape.text_frame.text.strip()
+                if not text:
+                    continue
+                left = shape.left or 0
+                top = shape.top or 0
+                shapes.append({"text": text, "left": int(left), "top": int(top)})
+            except Exception:
+                continue
+
+        # Identify label shapes
+        for lbl in shapes:
+            entity_type = classify_label(lbl["text"])
+            if entity_type not in ("PERSON", "DATE_OF_BIRTH"):
+                continue
+
+            # Find the nearest value shape below or to the right of the label
+            best = None
+            best_dist = None
+            for cand in shapes:
+                if cand is lbl:
+                    continue
+                # Candidate should not itself be a known label
+                if classify_label(cand["text"]) is not None:
+                    continue
+                dx = cand["left"] - lbl["left"]
+                dy = cand["top"] - lbl["top"]
+                # Value is typically directly below (small dx, positive dy)
+                if dy < 0 or abs(dx) > 500000:  # ~0.5 inch tolerance (EMU)
+                    continue
+                dist = abs(dx) + dy
+                if best_dist is None or dist < best_dist:
+                    best_dist = dist
+                    best = cand
+
+            if best is None:
+                continue
+
+            value = best["text"]
+            if entity_type == "DATE_OF_BIRTH" and not _looks_like_date(value):
+                continue
+            if self._entity_types and entity_type not in self._entity_types:
+                continue
+
+            found.append(DetectedEntity(
+                entity_type=entity_type,
+                value=value,
+                location=location,
+                context=f"{lbl['text']}: {value}",
+                confidence=0.9,
+            ))
+
+        return found
+
     def _scan_shape(self, shape, location: str) -> list[DetectedEntity]:
         """Scan a shape for entities."""
         entities = []
@@ -165,14 +255,20 @@ class PptxProtector:
                     para_entities = self._detect_in_text(text, location)
                     entities.extend(para_entities)
         
-        # Table
+        # Table - use first row as header context
         if shape.has_table:
             table = shape.table
-            for row in table.rows:
-                for cell in row.cells:
-                    if cell.text.strip():
-                        cell_entities = self._detect_in_text(cell.text, f"{location} table")
-                        entities.extend(cell_entities)
+            rows = list(table.rows)
+            if rows:
+                headers = [c.text.strip() for c in rows[0].cells]
+                for row in rows[1:]:
+                    for col_idx, cell in enumerate(row.cells):
+                        if cell.text.strip():
+                            header = headers[col_idx] if col_idx < len(headers) else ""
+                            cell_entities = self._detect_in_cell(
+                                cell.text, header, f"{location} table"
+                            )
+                            entities.extend(cell_entities)
         
         # Group shape - recurse
         if shape.shape_type == 6:  # MSO_SHAPE_TYPE.GROUP
@@ -225,8 +321,88 @@ class PptxProtector:
                     location=location,
                     context=f"...{context}...",
                 ))
-        
+
+        # Context-aware recognizers for names and birth dates
+        entities.extend(self._detect_context_aware(text, location))
+
+        # Global user-defined custom patterns (e.g. hospital MR numbers)
+        entities.extend(self._detect_custom_patterns(text, location))
+
         return entities
+
+    def _detect_custom_patterns(self, text: str, location: str) -> list[DetectedEntity]:
+        """Detect matches from global user-defined custom patterns."""
+        found: list[DetectedEntity] = []
+        try:
+            from sandiraksa.detection.custom_patterns import find_custom_matches
+
+            for m in find_custom_matches(text):
+                found.append(DetectedEntity(
+                    entity_type=m.label,
+                    value=m.value,
+                    location=location,
+                    context=text[:60],
+                    confidence=0.95,
+                ))
+        except Exception as e:
+            logger.warning(f"Custom pattern detection failed: {e}")
+        return found
+
+    def _detect_context_aware(self, text: str, location: str) -> list[DetectedEntity]:
+        """Use context-aware recognizers for PERSON and DATE_OF_BIRTH."""
+        found: list[DetectedEntity] = []
+        try:
+            from sandiraksa.detection.recognizers.id_person import (
+                IndonesianPersonRecognizer,
+            )
+            from sandiraksa.detection.recognizers.id_dob import (
+                DateOfBirthRecognizer,
+            )
+
+            recognizers = []
+            if not self._entity_types or "PERSON" in self._entity_types:
+                recognizers.append(IndonesianPersonRecognizer())
+            if not self._entity_types or "DATE_OF_BIRTH" in self._entity_types:
+                recognizers.append(DateOfBirthRecognizer())
+
+            for rec in recognizers:
+                for r in rec.analyze(text, rec.supported_entities):
+                    found.append(DetectedEntity(
+                        entity_type=r.entity_type,
+                        value=r.text,
+                        location=location,
+                        context=text[:60],
+                        confidence=r.score,
+                    ))
+        except Exception as e:
+            logger.warning(f"Context-aware detection failed: {e}")
+        return found
+
+    def _detect_in_cell(self, text: str, header: str, location: str) -> list[DetectedEntity]:
+        """Detect entities in a table cell using the column header as context."""
+        text = text.strip()
+        if not text:
+            return []
+
+        from sandiraksa.detection.recognizers.context_classifier import (
+            classify_label,
+        )
+
+        entity_type = classify_label(header) if header else None
+        if entity_type and entity_type in ("PERSON", "DATE_OF_BIRTH", "LOCATION"):
+            if self._entity_types and entity_type not in self._entity_types:
+                return []
+            if entity_type == "DATE_OF_BIRTH" and not _looks_like_date(text):
+                return []
+            return [DetectedEntity(
+                entity_type=entity_type,
+                value=text,
+                location=location,
+                context=f"{header}: {text}",
+                confidence=0.9,
+            )]
+
+        return self._detect_in_text(text, location)
     
     def protect_file(
         self,

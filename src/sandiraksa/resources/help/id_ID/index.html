@@ -36,6 +36,7 @@
         <li><a href="#memulai">Memulai</a></li>
         <li><a href="#proyek">Mengelola Proyek</a></li>
         <li><a href="#memindai">Memindai Dokumen</a></li>
+        <li><a href="#pola-kustom">Pola Kustom (Global)</a></li>
         <li><a href="#meninjau">Meninjau Temuan</a></li>
         <li><a href="#melindungi">Melindungi Data</a></li>
         <li><a href="#memulihkan">Memulihkan Data</a></li>
@@ -72,18 +73,45 @@
     <h2 id="memindai">🔍 Memindai Dokumen</h2>
     <p>Pemindaian mendeteksi data sensitif dalam dokumen menggunakan:</p>
     <ul>
-        <li>Pola regex untuk format Indonesia (NIK, NPWP, nomor HP)</li>
-        <li>Named Entity Recognition untuk nama orang dan organisasi</li>
-        <li>Aturan kustom yang Anda definisikan</li>
+        <li>Pola untuk format Indonesia (NIK, NPWP, No. KK, BPJS, nomor HP)</li>
+        <li>Deteksi <strong>nama orang</strong> berbasis konteks (label "Nama:", pola baris EMR, header kolom)</li>
+        <li>Deteksi <strong>tanggal lahir</strong> cerdas — membedakan tanggal lahir dari tanggal kunjungan/janji temu</li>
+        <li><strong>Pola Kustom</strong> yang Anda definisikan sendiri (mis. format Nomor Rekam Medis tiap rumah sakit)</li>
     </ul>
     
     <h3>Langkah Pemindaian</h3>
     <ol>
         <li>Tambahkan file ke proyek</li>
+        <li>Untuk Excel/CSV: pilih kolom yang akan dilindungi (kolom sensitif direkomendasikan otomatis berdasarkan nama header <em>dan</em> isi kolom)</li>
         <li>Klik <strong>Pindai Semua</strong></li>
         <li>Tunggu proses selesai</li>
         <li>Tinjau hasilnya</li>
     </ol>
+
+    <div class="tip">
+        <strong>💡 Deteksi Kolom Otomatis (Excel/CSV):</strong> SandiRaksa menganalisis nama header <em>dan</em> contoh isi kolom untuk merekomendasikan kolom mana yang berisi data sensitif — meski nama header tidak jelas.
+    </div>
+
+    <h2 id="pola-kustom">🧩 Pola Kustom (Global)</h2>
+    <p>Setiap organisasi bisa punya format data sendiri, misalnya Nomor Rekam Medis yang berbeda di tiap rumah sakit. Anda bisa mendefinisikan pola sendiri yang berlaku untuk <strong>semua proyek</strong>.</p>
+
+    <h3>Cara Membuat Pola Kustom</h3>
+    <ol>
+        <li>Buka menu <strong>Pengaturan → Pola Kustom...</strong></li>
+        <li>Tulis pola dengan format <code>NAMA: pola</code> (satu pola per baris)</li>
+        <li>Klik <strong>Validasi</strong> untuk memeriksa, lalu <strong>Simpan</strong></li>
+    </ol>
+
+    <h3>Contoh</h3>
+    <pre>
+REKAM_MEDIS: MR-\d{6}
+NO_KAMAR: (?:Kamar|Room)\s?\d+
+ID_PEGAWAI: EMP-\d{4,6}</pre>
+    <p>Pola ditulis sebagai <em>regular expression</em>. Baris diawali <code>#</code> dianggap komentar.</p>
+
+    <div class="note">
+        <strong>📝 Catatan:</strong> Pola Kustom bersifat opsional. Jika dikosongkan, deteksi standar tetap berjalan normal.
+    </div>
     
     <h2 id="meninjau">👁️ Meninjau Temuan</h2>
     <p>Setelah pemindaian, Anda dapat meninjau setiap temuan:</p>
@@ -136,12 +164,14 @@ Sesudah: [[PERSON_7F31A2]] bekerja di [[ORG_B4C9E1]] dengan email [[EMAIL_3D2F1C
         <li><strong>ID_NIK</strong> - Nomor Induk Kependudukan (16 digit)</li>
         <li><strong>ID_NPWP</strong> - Nomor Pokok Wajib Pajak</li>
         <li><strong>ID_KK</strong> - Nomor Kartu Keluarga</li>
+        <li><strong>ID_BPJS</strong> - Nomor BPJS Kesehatan</li>
         <li><strong>ID_PHONE</strong> - Nomor telepon Indonesia</li>
     </ul>
     
-    <h3>Data Internasional</h3>
+    <h3>Data Pribadi & Internasional</h3>
     <ul>
-        <li><strong>PERSON</strong> - Nama orang</li>
+        <li><strong>PERSON</strong> - Nama orang (deteksi berbasis konteks)</li>
+        <li><strong>DATE_OF_BIRTH</strong> - Tanggal lahir (dibedakan dari tanggal kunjungan)</li>
         <li><strong>EMAIL</strong> - Alamat email</li>
         <li><strong>PHONE</strong> - Nomor telepon umum</li>
         <li><strong>ADDRESS</strong> - Alamat</li>
@@ -149,6 +179,11 @@ Sesudah: [[PERSON_7F31A2]] bekerja di [[ORG_B4C9E1]] dengan email [[EMAIL_3D2F1C
         <li><strong>CREDIT_CARD</strong> - Nomor kartu kredit</li>
         <li><strong>BANK_ACCOUNT</strong> - Nomor rekening</li>
         <li><strong>IP_ADDRESS</strong> - Alamat IP</li>
+    </ul>
+
+    <h3>Tipe Kustom</h3>
+    <ul>
+        <li><strong>Pola Kustom</strong> - Tipe apa pun yang Anda definisikan sendiri lewat menu <strong>Pengaturan → Pola Kustom</strong> (mis. REKAM_MEDIS, NO_KAMAR, ID_PEGAWAI)</li>
     </ul>
     
     <h2 id="token">🎫 Tentang Token</h2>
@@ -164,6 +199,6 @@ Sesudah: [[PERSON_7F31A2]] bekerja di [[ORG_B4C9E1]] dengan email [[EMAIL_3D2F1C
     </ul>
     
     <hr>
-    <p><small>SandiRaksa v0.1.0 • Semua pemrosesan dilakukan secara lokal</small></p>
+    <p><small>SandiRaksa v1.0.0 • Semua pemrosesan dilakukan secara lokal</small></p>
 </body>
 </html>

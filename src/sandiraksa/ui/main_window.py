@@ -143,6 +143,12 @@ class MainWindow(QMainWindow):
 
         self._update_language_check()
 
+        # Custom patterns (global)
+        settings_menu.addSeparator()
+        self._custom_patterns_action = QAction("Pola Kustom...", self)
+        self._custom_patterns_action.triggered.connect(self._on_custom_patterns)
+        settings_menu.addAction(self._custom_patterns_action)
+
         # Help menu
         help_menu = menubar.addMenu(tr("menu.help"))
         assert help_menu is not None
@@ -749,10 +755,12 @@ class MainWindow(QMainWindow):
             # Create context
             config = DetectionConfig(
                 enabled_entity_types={
-                    "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
+                    "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
                     "IP_ADDRESS", "URL", "IBAN_CODE",
                     "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE",
-                }
+                    "PERSON", "DATE_OF_BIRTH",
+                },
+                min_confidence=0.5,
             )
             context = DetectionContext(
                 operation_id=str(uuid4()),
@@ -793,15 +801,22 @@ class MainWindow(QMainWindow):
             KKRecognizer,
             IndonesianPhoneRecognizer,
         )
-        
+        from sandiraksa.detection.recognizers.id_dob import DateOfBirthRecognizer
+        from sandiraksa.detection.recognizers.id_person import (
+            IndonesianPersonRecognizer,
+        )
+
         engine = DetectionEngine()
         engine.registry.register(RegexRecognizer())
         engine.registry.register(NIKRecognizer())
         engine.registry.register(NPWPRecognizer())
         engine.registry.register(KKRecognizer())
         engine.registry.register(IndonesianPhoneRecognizer())
+        # Context-aware recognizers for names and birth dates
+        engine.registry.register(DateOfBirthRecognizer())
+        engine.registry.register(IndonesianPersonRecognizer())
         engine.initialize()
-        
+
         return engine
     
     def _scan_xlsx_columns(self, path, selected_columns: list) -> list[dict]:
@@ -947,7 +962,12 @@ class MainWindow(QMainWindow):
             return ""
     
     def _read_docx_content(self, path) -> str:
-        """Read content from DOCX file."""
+        """Read content from DOCX file.
+
+        For tables, prepend the column header to each cell value as
+        "Header: Value" so context-aware recognizers (names, birth dates)
+        can use the header as detection context.
+        """
         try:
             from docx import Document
             
@@ -958,13 +978,27 @@ class MainWindow(QMainWindow):
                 if para.text.strip():
                     content_parts.append(para.text)
             
-            # Also read tables
+            # Read tables with header context.
             for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        if cell.text.strip():
-                            content_parts.append(cell.text)
-            
+                rows = list(table.rows)
+                if not rows:
+                    continue
+
+                # First row is treated as the header row
+                headers = [c.text.strip() for c in rows[0].cells]
+
+                for row in rows[1:]:
+                    for col_idx, cell in enumerate(row.cells):
+                        value = cell.text.strip()
+                        if not value:
+                            continue
+                        header = headers[col_idx] if col_idx < len(headers) else ""
+                        if header:
+                            # "Nama Mock: Aisyah Pratama" -> context for recognizers
+                            content_parts.append(f"{header}: {value}")
+                        else:
+                            content_parts.append(value)
+
             return "\n".join(content_parts)
             
         except ImportError:
@@ -1880,6 +1914,23 @@ class MainWindow(QMainWindow):
 
         dialog = DonateDialog(parent=self)
         dialog.exec()
+
+    def _on_custom_patterns(self) -> None:
+        """Show the global custom patterns editor dialog."""
+        from sandiraksa.ui.dialogs import CustomPatternsDialog
+
+        # Keep a strong reference to prevent premature GC crash
+        self._custom_patterns_dialog = CustomPatternsDialog(parent=self)
+        if self._custom_patterns_dialog.exec():
+            # Refresh cached patterns so subsequent scans use the new set
+            try:
+                from sandiraksa.detection.custom_patterns import (
+                    reload_global_patterns,
+                )
+
+                reload_global_patterns()
+            except Exception as e:
+                print(f"Failed to reload custom patterns: {e}")
 
     def set_status(self, message: str) -> None:
         """Update status bar message."""

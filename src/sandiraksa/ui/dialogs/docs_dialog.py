@@ -57,9 +57,9 @@ class DocsDialog(QDialog):
 
         layout.addSpacing(SPACING.MD)
 
-        # Documentation links
+        # Documentation links (hosted on GitHub)
         links = [
-            ("🌐", "Website & Dokumentasi Online", "https://sandiraksa.infosecguru.id"),
+            ("🌐", "Dokumentasi Online", "https://github.com/yuanyudistira/sandiraksa/tree/main/docs"),
             ("📖", "README & Panduan Memulai", "https://github.com/yuanyudistira/sandiraksa#readme"),
             ("🐛", "Laporkan Bug / Issue", "https://github.com/yuanyudistira/sandiraksa/issues"),
             ("💡", "Request Fitur Baru", "https://github.com/yuanyudistira/sandiraksa/issues/new"),

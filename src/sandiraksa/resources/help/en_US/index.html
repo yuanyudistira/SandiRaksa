@@ -36,6 +36,7 @@
         <li><a href="#getting-started">Getting Started</a></li>
         <li><a href="#projects">Managing Projects</a></li>
         <li><a href="#scanning">Scanning Documents</a></li>
+        <li><a href="#custom-patterns">Custom Patterns (Global)</a></li>
         <li><a href="#reviewing">Reviewing Findings</a></li>
         <li><a href="#protecting">Protecting Data</a></li>
         <li><a href="#restoring">Restoring Data</a></li>
@@ -72,10 +73,36 @@
     <h2 id="scanning">🔍 Scanning Documents</h2>
     <p>Scanning detects sensitive data using:</p>
     <ul>
-        <li>Regex patterns for Indonesian formats (NIK, NPWP, phone numbers)</li>
-        <li>Named Entity Recognition for person and organization names</li>
-        <li>Custom rules you define</li>
+        <li>Patterns for Indonesian formats (NIK, NPWP, KK, BPJS, phone numbers)</li>
+        <li>Context-based <strong>person name</strong> detection ("Name:" labels, EMR row patterns, table headers)</li>
+        <li>Smart <strong>date of birth</strong> detection — distinguishes birth dates from visit/appointment dates</li>
+        <li><strong>Custom Patterns</strong> you define yourself (e.g. hospital-specific Medical Record formats)</li>
     </ul>
+
+    <div class="tip">
+        <strong>💡 Automatic Column Detection (Excel/CSV):</strong> SandiRaksa analyzes both the header name <em>and</em> sample cell content to recommend which columns contain sensitive data — even when the header is ambiguous.
+    </div>
+
+    <h2 id="custom-patterns">🧩 Custom Patterns (Global)</h2>
+    <p>Every organization may have its own data formats, such as Medical Record numbers that differ per hospital. You can define your own patterns that apply to <strong>all projects</strong>.</p>
+
+    <h3>How to Create Custom Patterns</h3>
+    <ol>
+        <li>Open <strong>Settings → Custom Patterns...</strong></li>
+        <li>Write patterns as <code>NAME: pattern</code> (one per line)</li>
+        <li>Click <strong>Validate</strong> to check, then <strong>Save</strong></li>
+    </ol>
+
+    <h3>Example</h3>
+    <pre>
+MEDICAL_RECORD: MR-\d{6}
+ROOM: (?:Kamar|Room)\s?\d+
+EMPLOYEE_ID: EMP-\d{4,6}</pre>
+    <p>Patterns are written as <em>regular expressions</em>. Lines starting with <code>#</code> are comments.</p>
+
+    <div class="note">
+        <strong>📝 Note:</strong> Custom Patterns are optional. If left empty, standard detection still works normally.
+    </div>
     
     <h2 id="reviewing">👁️ Reviewing Findings</h2>
     <p>After scanning, you can review each finding:</p>
@@ -124,12 +151,14 @@ After:  [[PERSON_7F31A2]] works at [[ORG_B4C9E1]] with email [[EMAIL_3D2F1C]]</p
         <li><strong>ID_NIK</strong> - Indonesian National ID Number (16 digits)</li>
         <li><strong>ID_NPWP</strong> - Tax ID Number</li>
         <li><strong>ID_KK</strong> - Family Card Number</li>
+        <li><strong>ID_BPJS</strong> - BPJS Health Insurance Number</li>
         <li><strong>ID_PHONE</strong> - Indonesian phone numbers</li>
     </ul>
     
-    <h3>International Data</h3>
+    <h3>Personal & International Data</h3>
     <ul>
-        <li><strong>PERSON</strong> - Person names</li>
+        <li><strong>PERSON</strong> - Person names (context-based detection)</li>
+        <li><strong>DATE_OF_BIRTH</strong> - Birth dates (distinguished from visit dates)</li>
         <li><strong>EMAIL</strong> - Email addresses</li>
         <li><strong>PHONE</strong> - General phone numbers</li>
         <li><strong>ADDRESS</strong> - Addresses</li>
@@ -137,6 +166,11 @@ After:  [[PERSON_7F31A2]] works at [[ORG_B4C9E1]] with email [[EMAIL_3D2F1C]]</p
         <li><strong>CREDIT_CARD</strong> - Credit card numbers</li>
         <li><strong>BANK_ACCOUNT</strong> - Bank account numbers</li>
         <li><strong>IP_ADDRESS</strong> - IP addresses</li>
+    </ul>
+
+    <h3>Custom Types</h3>
+    <ul>
+        <li><strong>Custom Patterns</strong> - Any type you define yourself via <strong>Settings → Custom Patterns</strong> (e.g. MEDICAL_RECORD, ROOM, EMPLOYEE_ID)</li>
     </ul>
     
     <h2 id="tokens">🎫 About Tokens</h2>
@@ -152,6 +186,6 @@ After:  [[PERSON_7F31A2]] works at [[ORG_B4C9E1]] with email [[EMAIL_3D2F1C]]</p
     </ul>
     
     <hr>
-    <p><small>SandiRaksa v0.1.0 • All processing is done locally</small></p>
+    <p><small>SandiRaksa v1.0.0 • All processing is done locally</small></p>
 </body>
 </html>

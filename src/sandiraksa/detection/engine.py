@@ -255,7 +255,26 @@ class DetectionEngine:
                     f"Recognizer '{recognizer.name}' failed: {str(e)}"
                 )
 
+        # Post-filter: remove false-positive PERSON detections
+        all_results = self._filter_false_positives(all_results, text)
+
         return all_results
+
+    def _filter_false_positives(
+        self,
+        results: list[DetectionResult],
+        text: str = "",
+    ) -> list[DetectionResult]:
+        """Remove common false-positive PERSON detections."""
+        try:
+            from sandiraksa.detection.recognizers.person_filter import (
+                filter_person_detections,
+            )
+
+            return filter_person_detections(results, text)
+        except Exception as e:
+            logger.warning(f"Person filter failed, returning unfiltered: {e}")
+            return results
 
     def analyze_segment(
         self,
@@ -279,9 +298,11 @@ class DetectionEngine:
         context.stats.total_characters += len(segment.text)
 
         # Attach location information
+        import copy
+
         for result in results:
             # Create location from segment + result offsets
-            location = segment.location.model_copy()
+            location = copy.copy(segment.location)
             location.start_offset = segment.parent_offset + result.start
             location.end_offset = segment.parent_offset + result.end
             result.document_location = location

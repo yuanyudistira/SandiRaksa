@@ -14,6 +14,7 @@ from sandiraksa.ui.dialogs.help_dialog import HelpDialog
 from sandiraksa.ui.dialogs.docs_dialog import DocsDialog
 from sandiraksa.ui.dialogs.contact_dialog import ContactDialog
 from sandiraksa.ui.dialogs.donate_dialog import DonateDialog
+from sandiraksa.ui.dialogs.custom_patterns_dialog import CustomPatternsDialog
 
 __all__ = [
     "AboutDialog",
@@ -28,4 +29,5 @@ __all__ = [
     "DocsDialog",
     "ContactDialog",
     "DonateDialog",
+    "CustomPatternsDialog",
 ]

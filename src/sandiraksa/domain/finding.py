@@ -50,8 +50,8 @@ class DocumentLocation:
     """Location of a finding within a document."""
 
     # Common fields
-    file_id: str
-    component_type: str  # e.g., "cell", "paragraph", "text_box", "note"
+    file_id: str = ""
+    component_type: str = ""  # e.g., "cell", "paragraph", "text_box", "note"
 
     # For text-based locations
     start_offset: int | None = None
@@ -66,6 +66,27 @@ class DocumentLocation:
 
     # Run information for OOXML
     run_indices: list[int] = field(default_factory=list)
+
+    # Legacy aliases (deprecated - use component_type/cell_address)
+    element_type: str | None = None  # Alias for component_type
+    element_id: str | None = None  # Alias for cell_address
+    row_number: int | None = None  # Legacy field
+    column_number: int | None = None  # Legacy field
+    column_name: str | None = None  # Legacy field
+
+    def __post_init__(self):
+        """Handle legacy field mapping."""
+        # Map legacy element_type to component_type
+        if self.element_type and not self.component_type:
+            self.component_type = self.element_type
+        elif self.component_type and not self.element_type:
+            self.element_type = self.component_type
+
+        # Map legacy element_id to cell_address
+        if self.element_id and not self.cell_address:
+            self.cell_address = self.element_id
+        elif self.cell_address and not self.element_id:
+            self.element_id = self.cell_address
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""

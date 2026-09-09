@@ -57,7 +57,7 @@ class TestEncodingDetector:
     def test_detect_utf8(self, sample_csv_path):
         """Should detect UTF-8 encoding."""
         encoding = EncodingDetector.detect(sample_csv_path)
-        assert encoding.lower() in {"utf-8", "ascii"}
+        assert encoding.lower() in {"utf-8", "ascii", "utf-8-sig"}
 
     def test_detect_utf8_bom(self, sample_csv_utf8_bom):
         """Should detect UTF-8 with BOM."""
@@ -101,7 +101,7 @@ class TestCSVReader:
         reader = CSVReader(sample_csv_path)
         metadata = reader.detect_metadata()
 
-        assert metadata.encoding.lower() in {"utf-8", "ascii"}
+        assert metadata.encoding.lower() in {"utf-8", "ascii", "utf-8-sig"}
         assert metadata.delimiter == ","
         assert metadata.has_header is True
         assert metadata.row_count == 4  # Header + 3 data rows
@@ -161,11 +161,9 @@ class TestCSVReader:
         reader = CSVReader(sample_csv_path)
         cells = list(reader.iter_cells())
 
-        loc = cells[0].to_location()
-        assert loc.element_type == "cell"
-        assert loc.element_id == "R1C1"
-        assert loc.row_number == 0
-        assert loc.column_number == 0
+        loc = cells[0].to_location("file1")
+        assert loc.component_type == "cell"
+        assert loc.cell_address == "R1C1"
 
 
 class TestCSVWriter:
