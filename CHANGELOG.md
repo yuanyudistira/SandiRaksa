@@ -5,6 +5,11 @@ All notable changes to SandiRaksa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-09
+
+### Fixed
+- **Credit Card False Positive** - NIK-style IDs such as `MOCK-3174-19880214-1001` were incorrectly detected as credit cards. The credit card pattern now requires a consistent separator (all spaces, all dashes, or none) across the four digit groups, so mixed-separator ID formats no longer match. Fixed across all formats: TXT, DOCX, PPTX, Excel, and CSV.
+
 ## [1.0.0] - 2026-09-09
 
 ### 🎉 First Stable Release

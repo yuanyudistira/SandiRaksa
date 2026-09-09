@@ -68,7 +68,9 @@ class TxtProtector:
         "ID_NIK": r'\b[1-9]\d{15}\b',  # 16-digit starting with non-zero
         "ID_NPWP": r'\b\d{2}\.?\d{3}\.?\d{3}\.?\d[-.]?\d{3}\.?\d{3}\b',
         "ID_KK": r'\b[1-9]\d{15}\b',  # Same format as NIK
-        "CREDIT_CARD": r'\b(?:\d{4}[\s-]?){3}\d{4}\b',
+        # Credit card: 4 groups of 4 digits with a CONSISTENT separator so
+        # NIK-style IDs like "3174-19880214-1001" are not misdetected.
+        "CREDIT_CARD": r'\b\d{4}([\s-]?)\d{4}\1\d{4}\1\d{4}\b',
         "IP_ADDRESS": r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
         # Date formats: DD/MM/YYYY, YYYY-MM-DD, DD-Mon-YYYY, etc.
         "DATE": r'\b(?:\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)[-/]\d{2,4})\b',

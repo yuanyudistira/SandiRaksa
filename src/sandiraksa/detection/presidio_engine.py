@@ -340,8 +340,9 @@ class RegexRecognizer(BaseRecognizer):
         "CREDIT_CARD": [
             # Major card patterns (Visa, MC, Amex, etc.)
             (r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b", 0.85),
-            # With separators
-            (r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b", 0.7),
+            # 4 groups of 4 digits with a CONSISTENT separator (backreference)
+            # so NIK-style IDs like "3174-19880214-1001" do NOT match.
+            (r"\b\d{4}([-\s]?)\d{4}\1\d{4}\1\d{4}\b", 0.7),
         ],
         "IP_ADDRESS": [
             # IPv4
