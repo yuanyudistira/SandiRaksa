@@ -73,93 +73,9 @@ jobs:
           path: dist/*.exe
           retention-days: 5
 
-  build-macos-intel:
-    name: Build macOS
-    runs-on: macos-13  # Intel Mac - universal binary works on both
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install pyinstaller
-      
-      - name: Build executable
-        run: |
-          pyinstaller --name SandiRaksa \
-            --windowed \
-            --onefile \
-            --add-data "src/sandiraksa/resources:sandiraksa/resources" \
-            --hidden-import=PySide6.QtSvg \
-            --hidden-import=PySide6.QtXml \
-            --hidden-import=presidio_analyzer \
-            --hidden-import=presidio_anonymizer \
-            --hidden-import=spacy \
-            --hidden-import=openpyxl \
-            --hidden-import=docx \
-            --hidden-import=pptx \
-            --hidden-import=cryptography \
-            --hidden-import=keyring \
-            --hidden-import=charset_normalizer \
-            --collect-all=presidio_analyzer \
-            --osx-bundle-identifier=id.infosecguru.sandiraksa \
-            --noconfirm \
-            src/sandiraksa/__main__.py
-      
-      - name: Get version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION="dev"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Create DMG
-        run: |
-          # Install create-dmg
-          brew install create-dmg
-          
-          # Clear quarantine
-          xattr -cr dist/SandiRaksa || true
-          
-          # Create DMG
-          create-dmg \
-            --volname "SandiRaksa" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --app-drop-link 450 185 \
-            "dist/SandiRaksa-${{ steps.version.outputs.version }}-macos-x64.dmg" \
-            "dist/SandiRaksa" || true
-          
-          # Fallback: zip if DMG fails
-          if [ ! -f "dist/SandiRaksa-${{ steps.version.outputs.version }}-macos-x64.dmg" ]; then
-            cd dist && zip -r "SandiRaksa-${{ steps.version.outputs.version }}-macos-x64.zip" SandiRaksa
-          fi
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-intel-build
-          path: |
-            dist/*.dmg
-            dist/*.zip
-          retention-days: 5
-
   create-release:
     name: Create Release
-    needs: [build-windows, build-macos-intel]
+    needs: [build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     
@@ -190,7 +106,6 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/windows-build/*
-            artifacts/macos-intel-build/*
           body: |
             ## SandiRaksa v${{ steps.version.outputs.version }}
             
@@ -199,7 +114,6 @@ jobs:
             | Platform | Architecture | File |
             |----------|--------------|------|
             | Windows | x64 | `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe` |
-            | macOS | Universal | `SandiRaksa-${{ steps.version.outputs.version }}-macos-x64.dmg` |
             
             ### Installation
             
@@ -207,11 +121,6 @@ jobs:
             1. Download `.exe` file
             2. Run the executable
             3. If Windows Defender warns, click "More info" → "Run anyway"
-            
-            **macOS:**
-            1. Download `.dmg` file
-            2. Open DMG and drag SandiRaksa to Applications
-            3. If blocked by Gatekeeper, right-click → Open → Open
             
             ### What's New
             
