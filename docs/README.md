@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="sandiraksa-header.png" alt="SandiRaksa" width="600">
+  <img src="sandiraksa-hero-banner.png" alt="SandiRaksa" width="720">
 </p>
 
 # Panduan Pengguna SandiRaksa

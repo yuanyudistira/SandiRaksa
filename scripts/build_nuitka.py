@@ -84,12 +84,12 @@ def get_nuitka_args(target_platform: str, output_dir: Path) -> list[str]:
     # Platform-specific options
     if target_platform == "windows":
         # Check if icon exists
-        icon_path = PROJECT_ROOT / "src/sandiraksa/resources/icons/app.ico"
+        icon_path = PROJECT_ROOT / "src/sandiraksa/resources/icons/sandiraksa.ico"
         if icon_path.exists():
             args.append(f"--windows-icon-from-ico={icon_path}")
         args.append("--output-filename=SandiRaksa.exe")
     elif target_platform == "macos":
-        icon_path = PROJECT_ROOT / "src/sandiraksa/resources/icons/app.icns"
+        icon_path = PROJECT_ROOT / "src/sandiraksa/resources/icons/sandiraksa.icns"
         args.append("--macos-create-app-bundle")
         if icon_path.exists():
             args.append(f"--macos-app-icon={icon_path}")
@@ -98,7 +98,7 @@ def get_nuitka_args(target_platform: str, output_dir: Path) -> list[str]:
             "--output-filename=SandiRaksa",
         ])
     else:  # linux
-        icon_path = PROJECT_ROOT / "src/sandiraksa/resources/icons/app.png"
+        icon_path = PROJECT_ROOT / "src/sandiraksa/resources/icons/sandiraksa.png"
         if icon_path.exists():
             args.append(f"--linux-icon={icon_path}")
         args.append("--output-filename=sandiraksa")

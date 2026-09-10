@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/sandiraksa-header.png" alt="SandiRaksa" width="600">
+  <img src="docs/sandiraksa-hero-banner.png" alt="SandiRaksa" width="720">
 </p>
 
 # SandiRaksa

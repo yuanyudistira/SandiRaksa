@@ -1,19 +1,18 @@
 """
-Donate Dialog - Support Development.
+Sponsor Dialog.
 
-Shows donation information.
+Shows a sponsored recommendation instead of donation details.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
     QLabel,
     QPushButton,
     QVBoxLayout,
-    QHBoxLayout,
     QWidget,
     QFrame,
 )
@@ -21,8 +20,14 @@ from PySide6.QtWidgets import (
 from sandiraksa.ui.theme import ColorPalette, FONT_SIZE, SPACING
 
 
+SPONSOR_URL = (
+    "https://lakukeras.id/seller/toko-digital-tenda-mina/"
+    "pdf-buku-panduan-cyber-security/pay"
+)
+
+
 class DonateDialog(QDialog):
-    """Donation information dialog."""
+    """Sponsor / recommended-resource dialog."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -30,15 +35,15 @@ class DonateDialog(QDialog):
 
     def _setup_ui(self) -> None:
         """Setup the UI layout."""
-        self.setWindowTitle("Dukung Pengembangan SandiRaksa")
-        self.setFixedSize(450, 420)
+        self.setWindowTitle("Sponsor")
+        self.setFixedSize(460, 360)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(SPACING.LG)
         layout.setContentsMargins(SPACING.XL, SPACING.XL, SPACING.XL, SPACING.XL)
 
         # Title
-        title = QLabel("❤️ Dukung Pengembangan")
+        title = QLabel("Sponsor")
         title.setStyleSheet(
             f"font-size: {FONT_SIZE.TITLE}px; "
             f"font-weight: bold; "
@@ -50,7 +55,7 @@ class DonateDialog(QDialog):
         # Description
         desc = QLabel(
             "SandiRaksa adalah proyek open source yang dikembangkan secara mandiri. "
-            "Dukungan Anda membantu pengembangan fitur baru dan pemeliharaan aplikasi."
+            "Dukung pengembangan dengan melihat sumber belajar rekomendasi kami."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet(f"color: {ColorPalette.GRAY_600.value}; line-height: 1.5;")
@@ -59,16 +64,7 @@ class DonateDialog(QDialog):
 
         layout.addSpacing(SPACING.MD)
 
-        # Donation methods
-        methods_title = QLabel("💳 Metode Donasi")
-        methods_title.setStyleSheet(
-            f"font-weight: 600; "
-            f"font-size: {FONT_SIZE.LG}px; "
-            f"color: {ColorPalette.GRAY_800.value};"
-        )
-        layout.addWidget(methods_title)
-
-        # GoPay/OVO Card
+        # Sponsor card
         card = QFrame()
         card.setStyleSheet(
             f"background-color: {ColorPalette.GRAY_50.value}; "
@@ -79,56 +75,37 @@ class DonateDialog(QDialog):
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(SPACING.SM)
 
-        gopay_title = QLabel("📱 GoPay / OVO")
-        gopay_title.setStyleSheet(
-            f"font-weight: 600; color: {ColorPalette.GRAY_800.value};"
-        )
-        card_layout.addWidget(gopay_title)
-
-        phone_number = "+6281264656688"
-        phone_label = QLabel(f"<b>{phone_number}</b>")
-        phone_label.setStyleSheet(
+        product_title = QLabel("Panduan Cyber Security (PDF)")
+        product_title.setStyleSheet(
+            f"font-weight: 600; "
             f"font-size: {FONT_SIZE.LG}px; "
-            f"color: {ColorPalette.PRIMARY.value}; "
-            f"padding: {SPACING.SM}px 0;"
+            f"color: {ColorPalette.GRAY_800.value};"
         )
-        phone_label.setTextFormat(Qt.TextFormat.RichText)
-        card_layout.addWidget(phone_label)
+        product_title.setWordWrap(True)
+        card_layout.addWidget(product_title)
 
-        # Copy button
-        copy_btn = QPushButton("📋 Salin Nomor")
-        copy_btn.clicked.connect(lambda: self._copy_to_clipboard(phone_number))
-        copy_btn.setStyleSheet(
-            f"padding: {SPACING.SM}px {SPACING.MD}px; "
-            f"background-color: {ColorPalette.GRAY_100.value};"
+        product_desc = QLabel(
+            "Buku panduan praktis untuk meningkatkan keamanan digital Anda."
         )
-        card_layout.addWidget(copy_btn)
+        product_desc.setWordWrap(True)
+        product_desc.setStyleSheet(f"color: {ColorPalette.GRAY_600.value};")
+        card_layout.addWidget(product_desc)
+
+        download_btn = QPushButton("Download Panduan")
+        download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        download_btn.clicked.connect(self._open_sponsor_link)
+        download_btn.setStyleSheet(
+            f"padding: {SPACING.SM}px {SPACING.MD}px; "
+            f"background-color: {ColorPalette.PRIMARY.value}; "
+            f"color: white; "
+            f"font-weight: 600; "
+            f"border-radius: 6px;"
+        )
+        card_layout.addWidget(download_btn)
 
         layout.addWidget(card)
 
-        layout.addSpacing(SPACING.SM)
-
-        # Thank you message
-        thanks = QLabel(
-            "🙏 Terima kasih atas dukungan Anda!\n"
-            "Setiap kontribusi sangat berarti untuk pengembangan SandiRaksa."
-        )
-        thanks.setWordWrap(True)
-        thanks.setStyleSheet(
-            f"color: {ColorPalette.GRAY_500.value}; "
-            f"font-style: italic; "
-            f"text-align: center;"
-        )
-        thanks.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(thanks)
-
         layout.addStretch()
-
-        # Status label for copy feedback
-        self._status_label = QLabel("")
-        self._status_label.setStyleSheet(f"color: {ColorPalette.SUCCESS.value};")
-        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._status_label)
 
         # Close button
         close_btn = QPushButton("Tutup")
@@ -136,11 +113,9 @@ class DonateDialog(QDialog):
         close_btn.setFixedWidth(100)
         layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-    def _copy_to_clipboard(self, text: str) -> None:
-        """Copy text to clipboard."""
-        clipboard = QGuiApplication.clipboard()
-        clipboard.setText(text)
-        self._status_label.setText("✓ Nomor disalin ke clipboard!")
+    def _open_sponsor_link(self) -> None:
+        """Open the sponsor URL in the default browser."""
+        QDesktopServices.openUrl(QUrl(SPONSOR_URL))
 
 
 __all__ = ["DonateDialog"]

@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import gc
 import io
+import logging
 import os
 import sys
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 # Fix for PyInstaller --noconsole mode: sys.stdout/stderr may be None
 # This must be done BEFORE importing any module that uses logging or faulthandler
@@ -21,7 +24,8 @@ if sys.stderr is None:
 
 import faulthandler
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import Qt
 
 from sandiraksa.version import __version__
@@ -58,6 +62,7 @@ class SandiRaksaApp:
         self._argv = list(argv) if argv is not None else sys.argv
         self._app: QApplication | None = None
         self._main_window = None
+        self._splash: QSplashScreen | None = None
         # Keep references to dialogs to prevent premature cleanup
         self._dialogs: list = []
 
@@ -74,7 +79,40 @@ class SandiRaksaApp:
         app.setOrganizationName(self.ORG_NAME)
         app.setOrganizationDomain(self.ORG_DOMAIN)
 
+        # Application-wide window / taskbar icon.
+        try:
+            from sandiraksa.resources import app_icon_path
+
+            icon = app_icon_path()
+            if icon.exists():
+                app.setWindowIcon(QIcon(str(icon)))
+        except Exception as e:
+            logger.warning(f"Could not set window icon: {e}")
+
         return app
+
+    def _show_splash(self) -> None:
+        """Show a splash screen while the main window initializes."""
+        try:
+            from sandiraksa.resources import splash_image_path
+
+            path = splash_image_path()
+            if not path.exists():
+                return
+            pixmap = QPixmap(str(path))
+            if pixmap.isNull():
+                return
+            # Cap very large splash images to a sensible on-screen size.
+            if pixmap.width() > 700:
+                pixmap = pixmap.scaledToWidth(
+                    700, Qt.TransformationMode.SmoothTransformation
+                )
+            self._splash = QSplashScreen(pixmap, Qt.WindowType.WindowStaysOnTopHint)
+            self._splash.show()
+            if self._app is not None:
+                self._app.processEvents()
+        except Exception as e:
+            logger.warning(f"Could not show splash screen: {e}")
 
     def _initialize_services(self) -> None:
         """Initialize core application services."""
@@ -101,8 +139,14 @@ class SandiRaksaApp:
             Exit code from the application.
         """
         self._app = self._setup_application()
+        self._show_splash()
         self._initialize_services()
         self._create_main_window()
+
+        # Dismiss the splash once the main window is up.
+        if self._splash is not None and self._main_window is not None:
+            self._splash.finish(self._main_window)
+            self._splash = None
 
         result = self._app.exec()
         
