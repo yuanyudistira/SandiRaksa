@@ -94,3 +94,64 @@ class TestCustomPatternInColumn:
 
         samples = ["MR-004521", "MR-119283", "MR-556677"]
         assert analyze_column_content(samples) == "MEDICAL_RECORD"
+
+
+# =============================================================================
+# Narrative / free-text / JSON column detection + protection mode (A4)
+# =============================================================================
+
+from sandiraksa.ui.dialogs.column_selection import (  # noqa: E402
+    ProtectionMode,
+    NARRATIVE_TYPE,
+    is_narrative_column,
+    default_protection_mode,
+)
+
+
+class TestNarrativeColumnDetection:
+    def test_free_text_is_narrative(self):
+        samples = [
+            "Pasien Budi S (NIK: 3171234567890001) mengeluh pusing. Resep BPJS 0001234567890.",
+            "Cek lab Siti Aminah (0815123456789) menunjukkan gula darah 250 mg/dl.",
+            "Andi P perlu endoskopi. Penjamin: Asuransi Mandiri Inhealth.",
+        ]
+        assert is_narrative_column(samples) is True
+
+    def test_json_column_is_narrative(self):
+        samples = [
+            '{"patient_id": "MR-2026-888", "doctor": "dr. Andi Kurniawan", "room": "Melati 5"}',
+            '{"emp_id": "EMP-001", "name": "Budi Sanjaya", "bank_acc": "BCA-1234567890"}',
+        ]
+        assert is_narrative_column(samples) is True
+
+    def test_single_value_column_not_narrative(self):
+        assert is_narrative_column(["Budi Santoso", "Siti Aminah", "Andi Permana"]) is False
+
+    def test_short_codes_not_narrative(self):
+        assert is_narrative_column(["A+", "O-", "B+", "AB+"]) is False
+
+    def test_empty_samples_not_narrative(self):
+        assert is_narrative_column([]) is False
+        assert is_narrative_column(["", "  "]) is False
+
+
+class TestSuggestNarrativeType:
+    def test_narrative_header_content_returns_narrative_type(self):
+        samples = [
+            "Pasien Budi mengeluh nyeri dada sejak dua hari, tekanan darah tinggi.",
+            "Kontrol rutin diabetes, gula darah stabil, lanjut terapi metformin.",
+        ]
+        assert suggest_column_type("Catatan_Dokter", samples) == NARRATIVE_TYPE
+
+
+class TestDefaultProtectionMode:
+    def test_narrative_defaults_to_pii_only(self):
+        samples = [
+            "Pasien Budi mengeluh nyeri dada sejak dua hari, tekanan darah tinggi.",
+            "Kontrol rutin diabetes, gula darah stabil, lanjut terapi metformin.",
+        ]
+        assert default_protection_mode(NARRATIVE_TYPE, samples) == ProtectionMode.PII_ONLY.value
+
+    def test_single_value_defaults_to_full_cell(self):
+        samples = ["Budi Santoso", "Siti Aminah"]
+        assert default_protection_mode("PERSON", samples) == ProtectionMode.FULL_CELL.value

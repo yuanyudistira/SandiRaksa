@@ -303,6 +303,20 @@ CUSTOM_TERM = EntityType(
     requires_recognizer=True,
 )
 
+# Free-text / narrative column marker (Excel/CSV). Not a PII value itself; it
+# signals that a column holds long free text or structured text (JSON) and
+# should be protected per-substring (PII-only), not by censoring the whole cell.
+TEKS_NARASI = EntityType(
+    name="TEKS_NARASI",
+    display_name="Narrative Text",
+    display_name_id="Teks Narasi",
+    category=EntityCategory.CUSTOM,
+    description="Long free-text or structured-text column (protect per-PII)",
+    description_id="Kolom teks bebas/panjang atau terstruktur (proteksi per-PII)",
+    default_enabled=False,
+    requires_recognizer=False,
+)
+
 
 # =============================================================================
 # Entity Type Registry
@@ -344,6 +358,7 @@ class EntityTypeRegistry:
         SALARY,
         # Custom
         CUSTOM_TERM,
+        TEKS_NARASI,
     ]
 
     def __post_init__(self) -> None:

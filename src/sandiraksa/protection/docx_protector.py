@@ -175,6 +175,14 @@ class DocxProtector:
                         footer_entities = self._detect_in_text(para.text, "footer")
                         entities.extend(footer_entities)
             
+            # Global deny-list: drop user-excluded terms (all entity types).
+            try:
+                from sandiraksa.detection.deny_list import is_denied
+
+                entities = [e for e in entities if not is_denied(e.value)]
+            except Exception as de:
+                logger.warning(f"Deny-list filter failed, skipping: {de}")
+
             # Deduplicate by value
             seen = set()
             unique_entities = []
@@ -311,12 +319,17 @@ class DocxProtector:
             from sandiraksa.detection.recognizers.id_dob import (
                 DateOfBirthRecognizer,
             )
+            from sandiraksa.detection.recognizers.id_bpjs_legacy import (
+                BPJSRecognizerLegacy,
+            )
 
             recognizers = []
             if not self._entity_types or "PERSON" in self._entity_types:
                 recognizers.append(IndonesianPersonRecognizer())
             if not self._entity_types or "DATE_OF_BIRTH" in self._entity_types:
                 recognizers.append(DateOfBirthRecognizer())
+            if not self._entity_types or "ID_BPJS" in self._entity_types:
+                recognizers.append(BPJSRecognizerLegacy())
 
             for rec in recognizers:
                 for r in rec.analyze(text, rec.supported_entities):

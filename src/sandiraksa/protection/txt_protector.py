@@ -105,7 +105,7 @@ class TxtProtector:
         all_types = (
             list(self.PATTERNS.keys())
             + list(self.CONTEXT_PATTERNS.keys())
-            + ["DATE_OF_BIRTH"]
+            + ["DATE_OF_BIRTH", "ID_BPJS"]
         )
         self._entity_types = entity_types or all_types
     
@@ -211,6 +211,9 @@ class TxtProtector:
             from sandiraksa.detection.recognizers.id_dob import (
                 DateOfBirthRecognizer,
             )
+            from sandiraksa.detection.recognizers.id_bpjs_legacy import (
+                BPJSRecognizerLegacy,
+            )
             from sandiraksa.detection.recognizers.person_filter import (
                 is_false_positive_person,
             )
@@ -222,6 +225,9 @@ class TxtProtector:
             # detects all types, include it too.
             if "DATE_OF_BIRTH" in self._entity_types:
                 recognizers.append(DateOfBirthRecognizer())
+            # BPJS (13-digit, context-gated) — legacy-contract recognizer.
+            if "ID_BPJS" in self._entity_types:
+                recognizers.append(BPJSRecognizerLegacy())
 
             for rec in recognizers:
                 for r in rec.analyze(text, rec.supported_entities):
@@ -313,7 +319,15 @@ class TxtProtector:
         """
         if not entities:
             return []
-        
+
+        # Global deny-list: drop user-excluded terms across ALL entity types.
+        try:
+            from sandiraksa.detection.deny_list import is_denied
+
+            entities = [e for e in entities if not is_denied(e.value)]
+        except Exception as e:
+            logger.warning(f"Deny-list filter failed, skipping: {e}")
+
         result: list[DetectedEntity] = []
         
         for entity in entities:

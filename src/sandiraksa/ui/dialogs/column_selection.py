@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import csv
 import codecs  # Pre-import to avoid GC crash
+import json
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +24,7 @@ except ImportError:
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QGroupBox,
     QHBoxLayout,
@@ -61,6 +64,9 @@ SENSITIVE_KEYWORDS = {
     
     "kk": "ID_KK",
     "kartu keluarga": "ID_KK",
+
+    "bpjs": "ID_BPJS",
+    "jkn": "ID_BPJS",
     
     "hp": "ID_PHONE",
     "handphone": "ID_PHONE",
@@ -105,6 +111,28 @@ SENSITIVE_KEYWORDS = {
 }
 
 
+class ProtectionMode(str, Enum):
+    """How a selected column's cells are protected.
+
+    - FULL_CELL: the entire cell value is replaced with one token (default for
+      single-value columns like "Nama Pasien", "NIK", "Alamat").
+    - PII_ONLY: run detection inside each cell and tokenize ONLY the detected
+      PII substrings, leaving surrounding text/structure intact (default for
+      free-text / narrative / JSON columns).
+    """
+
+    FULL_CELL = "full_cell"
+    PII_ONLY = "pii_only"
+
+
+# Sentinel suggested_type for free-text / structured-text columns.
+NARRATIVE_TYPE = "TEKS_NARASI"
+
+# Narrative heuristic thresholds (averaged over sampled non-empty cells).
+_NARRATIVE_MIN_AVG_LEN = 50
+_NARRATIVE_MIN_AVG_TOKENS = 8
+
+
 @dataclass
 class ColumnInfo:
     """Information about a column."""
@@ -116,6 +144,9 @@ class ColumnInfo:
     sample_values: list[str] = field(default_factory=list)
     suggested_type: str | None = None
     is_selected: bool = False
+    # How this column should be protected. Auto-set from the column's content
+    # (narrative/JSON -> PII_ONLY, otherwise FULL_CELL) and user-overridable.
+    protection_mode: str = ProtectionMode.FULL_CELL.value
 
 
 @dataclass 
@@ -282,8 +313,63 @@ def suggest_column_type(header: str, sample_values: list[str]) -> str | None:
     if by_header:
         return by_header
 
-    # Fall back to analyzing the content
-    return analyze_column_content(sample_values)
+    # Content-based structured match (NIK, NPWP, email, etc.)
+    by_content = analyze_column_content(sample_values)
+    if by_content:
+        return by_content
+
+    # Free-text / structured-text (JSON) column -> narrative marker.
+    if is_narrative_column(sample_values):
+        return NARRATIVE_TYPE
+
+    return None
+
+
+def _looks_like_json(value: str) -> bool:
+    """True if a cell value looks like a JSON object/array."""
+    v = value.strip()
+    if not (v.startswith("{") or v.startswith("[")):
+        return False
+    try:
+        json.loads(v)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def is_narrative_column(sample_values: list[str]) -> bool:
+    """
+    Detect a free-text / structured-text ("narrative") column.
+
+    A column is narrative when its sampled cells are, on average, long free text
+    (many characters/words) OR most cells are JSON. Such columns must NOT be
+    censored whole-cell; only the PII inside should be tokenized.
+    """
+    non_empty = [v.strip() for v in sample_values if v and v.strip()]
+    if not non_empty:
+        return False
+
+    # JSON-heavy column (majority of cells parse as JSON).
+    json_count = sum(1 for v in non_empty if _looks_like_json(v))
+    if json_count / len(non_empty) >= 0.6:
+        return True
+
+    # Long free-text column.
+    avg_len = sum(len(v) for v in non_empty) / len(non_empty)
+    avg_tokens = sum(len(v.split()) for v in non_empty) / len(non_empty)
+    return avg_len >= _NARRATIVE_MIN_AVG_LEN and avg_tokens >= _NARRATIVE_MIN_AVG_TOKENS
+
+
+def default_protection_mode(suggested_type: str | None, sample_values: list[str]) -> str:
+    """
+    Choose a default protection mode for a column.
+
+    Narrative/JSON/free-text columns default to PII_ONLY (protect only the PII
+    inside each cell); everything else defaults to FULL_CELL.
+    """
+    if suggested_type == NARRATIVE_TYPE or is_narrative_column(sample_values):
+        return ProtectionMode.PII_ONLY.value
+    return ProtectionMode.FULL_CELL.value
 
 
 def _bump(counts: dict[str, int], key: str) -> None:
@@ -371,6 +457,7 @@ def analyze_excel_file(file_path: Path) -> list[WorksheetInfo]:
                     sample_values=samples[:3],
                     suggested_type=suggested_type,
                     is_selected=suggested_type is not None,  # Auto-select if suggested
+                    protection_mode=default_protection_mode(suggested_type, samples),
                 )
                 columns.append(col_info)
             
@@ -443,6 +530,7 @@ def analyze_csv_file(file_path: Path) -> list[WorksheetInfo]:
                 sample_values=samples[:3],
                 suggested_type=suggested_type,
                 is_selected=suggested_type is not None,
+                protection_mode=default_protection_mode(suggested_type, samples),
             )
             columns.append(col_info)
         
@@ -546,9 +634,20 @@ class ColumnCheckbox(QWidget):
         
         # Suggested type badge
         if self._column.suggested_type:
-            type_label = QLabel(self._column.suggested_type)
+            is_narrative = self._column.suggested_type == NARRATIVE_TYPE
+            badge_text = "TEKS NARASI" if is_narrative else self._column.suggested_type
+            badge_color = (
+                ColorPalette.WARNING.value if is_narrative
+                else ColorPalette.PRIMARY.value
+            )
+            type_label = QLabel(badge_text)
+            type_label.setToolTip(
+                "Kolom teks bebas/JSON — hanya data pribadi di dalamnya yang "
+                "diproteksi (bukan seluruh sel)."
+                if is_narrative else ""
+            )
             type_label.setStyleSheet(
-                f"background-color: {ColorPalette.PRIMARY.value}; "
+                f"background-color: {badge_color}; "
                 f"color: white; "
                 f"padding: 2px 8px; "
                 f"border-radius: 4px; "
@@ -557,7 +656,27 @@ class ColumnCheckbox(QWidget):
             layout.addWidget(type_label)
         
         layout.addStretch()
-        
+
+        # Protection-mode selector (how the cell is protected)
+        mode_label = QLabel("Mode:")
+        mode_label.setStyleSheet(f"color: {ColorPalette.GRAY_500.value};")
+        layout.addWidget(mode_label)
+
+        self._mode_combo = QComboBox()
+        # (label, value) — order matters for index mapping below
+        self._mode_combo.addItem("Sensor seluruh sel", ProtectionMode.FULL_CELL.value)
+        self._mode_combo.addItem("Proteksi data pribadi", ProtectionMode.PII_ONLY.value)
+        self._mode_combo.setToolTip(
+            "Sensor seluruh sel: ganti seluruh isi sel dengan satu token.\n"
+            "Proteksi data pribadi: hanya bagian PII di dalam sel yang diganti "
+            "(cocok untuk teks bebas / JSON)."
+        )
+        current = getattr(self._column, "protection_mode", ProtectionMode.FULL_CELL.value)
+        idx = self._mode_combo.findData(current)
+        self._mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        layout.addWidget(self._mode_combo)
+
         # Sample values
         if self._column.sample_values:
             samples = ", ".join(self._column.sample_values[:2])
@@ -566,6 +685,12 @@ class ColumnCheckbox(QWidget):
             sample_label = QLabel(f"e.g. {samples}")
             sample_label.setStyleSheet(f"color: {ColorPalette.GRAY_500.value}; font-style: italic;")
             layout.addWidget(sample_label)
+
+    def _on_mode_changed(self, index: int) -> None:
+        """Persist the chosen protection mode onto the ColumnInfo."""
+        value = self._mode_combo.itemData(index)
+        if value:
+            self._column.protection_mode = value
     
     def _on_toggled(self, checked: bool) -> None:
         self._column.is_selected = checked
@@ -781,9 +906,13 @@ __all__ = [
     "ColumnInfo",
     "WorksheetInfo", 
     "ColumnSelectionDialog",
+    "ProtectionMode",
+    "NARRATIVE_TYPE",
     "analyze_excel_file",
     "analyze_csv_file",
     "analyze_column_header",
     "analyze_column_content",
+    "is_narrative_column",
+    "default_protection_mode",
     "suggest_column_type",
 ]

@@ -36,14 +36,22 @@ class IndonesianPhoneRecognizer(BaseRecognizer):
         (re.compile(r"\b08\d{8,10}\b"), 0.85),
     ]
 
-    # Landline patterns
+    # Landline patterns.
+    #
+    # The "standard" pattern is deliberately kept tight: it REQUIRES an explicit
+    # separator (space/dash/dot) between the area code and the subscriber part.
+    # Without this, a bare 9-12 digit run like "021123456789" would be grabbed
+    # as a landline and over-match arbitrary numeric IDs. Numbers that are truly
+    # separator-less are still commonly written for mobiles (handled above);
+    # unseparated landlines are rare and better left to explicit-format cases.
     LANDLINE_PATTERNS: ClassVar[list[tuple[re.Pattern, float]]] = [
-        # International: +62-XX-XXXX-XXXX
+        # International: +62-XX-XXXX-XXXX (separators optional)
         (re.compile(r"\+62[-.\s]?\d{2,3}[-.\s]?\d{3,4}[-.\s]?\d{3,4}"), 0.85),
         # With area code in parentheses: (0XX) XXXX-XXXX
         (re.compile(r"\(0\d{2,3}\)[-.\s]?\d{3,4}[-.\s]?\d{3,4}"), 0.9),
-        # Standard: 0XX-XXXX-XXXX
-        (re.compile(r"\b0\d{2,3}[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"), 0.75),
+        # Standard: 0XX-XXXX-XXXX — REQUIRE at least one real separator so we
+        # don't swallow arbitrary long digit runs.
+        (re.compile(r"\b0\d{1,3}[-.\s]\d{3,4}[-.\s]?\d{3,4}\b"), 0.75),
     ]
 
     # Valid mobile prefixes
