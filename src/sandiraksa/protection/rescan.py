@@ -124,6 +124,9 @@ class RescanEngine:
             strict_mode: If True, any detection is critical. If False, uses confidence threshold.
         """
         self._engine = detection_engine or get_detection_engine()
+        # Ensure the engine is ready; analyze_text() requires initialization.
+        if not getattr(self._engine, "_initialized", False):
+            self._engine.initialize()
         self._strict_mode = strict_mode
 
         # Values that were tokenized (for reference)
@@ -417,8 +420,37 @@ def create_rescan_engine(
     detection_engine: DetectionEngine | None = None,
     strict_mode: bool = True,
 ) -> RescanEngine:
-    """Create a rescan engine."""
+    """Create a rescan engine.
+
+    When no engine is supplied, build one populated with the standard
+    recognizers so residual PII can actually be detected (the bare global
+    engine has none registered).
+    """
+    if detection_engine is None:
+        detection_engine = _build_default_rescan_engine()
     return RescanEngine(detection_engine, strict_mode)
+
+
+def _build_default_rescan_engine() -> DetectionEngine:
+    """Build a detection engine with the standard recognizer set."""
+    from sandiraksa.detection.presidio_engine import RegexRecognizer
+    from sandiraksa.detection.recognizers import (
+        NIKRecognizer,
+        NPWPRecognizer,
+        KKRecognizer,
+        IndonesianPhoneRecognizer,
+        BPJSRecognizerLegacy,
+    )
+
+    engine = DetectionEngine()
+    engine.registry.register(RegexRecognizer())
+    engine.registry.register(NIKRecognizer())
+    engine.registry.register(NPWPRecognizer())
+    engine.registry.register(KKRecognizer())
+    engine.registry.register(IndonesianPhoneRecognizer())
+    engine.registry.register(BPJSRecognizerLegacy())
+    engine.initialize()
+    return engine
 
 
 def create_validator() -> RescanValidator:

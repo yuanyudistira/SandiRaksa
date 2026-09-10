@@ -75,9 +75,11 @@ class CustomTerm:
             pattern = f"^{escaped}$"
 
         elif self.match_type == MatchType.WORD:
-            # Word boundary match
+            # Word boundary match. Also reject hyphen-adjacency so a term like
+            # "secret" does not match inside a hyphenated compound such as
+            # "top-secret" (treated as a distinct token).
             escaped = re.escape(self.pattern)
-            pattern = rf"\b{escaped}\b"
+            pattern = rf"(?<![\w-]){escaped}(?![\w-])"
 
         elif self.match_type == MatchType.CONTAINS:
             # Substring match
@@ -210,8 +212,11 @@ class CustomTermsRecognizer(BaseRecognizer):
         results: list[DetectionResult] = []
 
         for term in self._terms:
-            # Skip if entity type not requested
-            if term.entity_type not in entities and "CUSTOM_TERM" not in entities:
+            # Only include a term when its own entity type was requested.
+            # (Previously "CUSTOM_TERM" acted as a wildcard that returned every
+            # term regardless of type; that prevented requesting only the base
+            # custom terms.)
+            if term.entity_type not in entities:
                 continue
 
             # Compile and search

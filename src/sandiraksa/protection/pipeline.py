@@ -82,9 +82,9 @@ class TreatmentPlan:
 
         if finding.review_action == ReviewAction.PENDING:
             self.findings_pending += 1
-        elif finding.review_action == ReviewAction.ACCEPT:
+        elif finding.review_action == ReviewAction.PROTECT:
             self.findings_to_treat += 1
-        elif finding.review_action == ReviewAction.REJECT:
+        elif finding.review_action == ReviewAction.ALLOW:
             self.findings_to_keep += 1
 
     def add_treatment(self, finding_id: str, treatment: Treatment) -> None:
@@ -356,13 +356,13 @@ class ProtectionPipeline:
             treatment_type = default_treatment
 
             # Check finding review action
-            if finding.review_action == ReviewAction.REJECT:
+            if finding.review_action == ReviewAction.ALLOW:
                 treatment_type = TreatmentType.KEEP
 
             # Generate treatment using consistency manager
             treatment = self._consistency.process_finding(
                 finding=finding,
-                original_value=finding.original_text,
+                original_value=finding.detected_text,
                 treatment_type=treatment_type,
             )
 
@@ -462,7 +462,7 @@ class ProtectionPipeline:
             # Phase 2: Auto-accept if enabled
             if auto_accept:
                 for finding in plan.findings:
-                    finding.review_action = ReviewAction.ACCEPT
+                    finding.review_action = ReviewAction.PROTECT
                     plan.findings_to_treat += 1
                     plan.findings_pending -= 1
 

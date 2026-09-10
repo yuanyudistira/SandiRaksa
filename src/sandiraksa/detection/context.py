@@ -89,21 +89,16 @@ class DetectionResult:
         location: DocumentLocation,
     ) -> Finding:
         """Convert to a Finding domain object."""
-        registry = get_entity_registry()
-        entity_info = registry.get_or_default(self.entity_type)
-
         return Finding(
             id=str(uuid4()),
             file_id=file_id,
-            operation_id=operation_id,
             entity_type=self.entity_type,
-            original_text=self.text,
-            confidence_score=self.score,
-            confidence_band=self.confidence_band,
-            location=location,
-            recognizer_name=self.recognizer_name,
+            detector=self.recognizer_name or "unknown",
+            detected_text=self.text,
+            score=self.score,
+            confidence_band=self.confidence_band.value,
+            location=location.to_dict() if hasattr(location, "to_dict") else location,
             review_action=ReviewAction.PENDING,
-            detected_at=datetime.utcnow(),
         )
 
 
