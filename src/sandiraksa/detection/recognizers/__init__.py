@@ -41,6 +41,9 @@ from sandiraksa.detection.recognizers.id_bpjs import (
     BPJSMetadata,
     format_bpjs,
 )
+from sandiraksa.detection.recognizers.id_bpjs_legacy import (
+    BPJSRecognizerLegacy,
+)
 from sandiraksa.detection.recognizers.id_sim import (
     SIMRecognizer,
     SIMMetadata,
@@ -95,6 +98,7 @@ __all__ = [
     "parse_phone_indonesia",
     # New Indonesian recognizers (Sprint 4)
     "BPJSRecognizer",
+    "BPJSRecognizerLegacy",
     "BPJSMetadata",
     "format_bpjs",
     "SIMRecognizer",
