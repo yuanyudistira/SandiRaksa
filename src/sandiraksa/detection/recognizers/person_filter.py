@@ -75,6 +75,25 @@ _LABEL_FRAGMENTS: frozenset[str] = frozenset({
 })
 
 
+# Strong clinical / action / document terms. If ANY of these appears in a
+# candidate PERSON phrase, it is not a name (NLP over-extends into clauses like
+# "Demam Berdarah", "alergi penisilin", "Jangan berikan amoxicillin").
+_STRONG_NON_NAME_TERMS: frozenset[str] = frozenset({
+    # Diseases / symptoms / clinical
+    "demam", "berdarah", "batuk", "pilek", "nyeri", "sesak", "mual", "muntah",
+    "hipertensi", "diabetes", "dispepsia", "asma", "dermatitis", "ispa",
+    "alergi", "penisilin", "amoxicillin", "amoksisilin", "paracetamol",
+    "metformin", "amlodipine", "obat", "resep", "dosis", "diagnosis",
+    "diagnosa", "gula", "darah", "ruam", "gatal", "endoskopi", "terapi",
+    "penicillin", "antibiotik", "infeksi", "radang", "tumor", "kanker",
+    # Action / imperative words NLP glues on
+    "jangan", "berikan", "menunjukkan", "mengeluh", "kontrol", "isolasi",
+    "rujukan", "rawat", "periksa", "cek",
+    # Generic
+    "penjamin", "asuransi", "mandiri", "inhealth",
+})
+
+
 # A detection containing any of these characters is not a clean person name.
 _INVALID_CHARS: re.Pattern = re.compile(r"[0-9|:=/\\@#\[\](){}<>]")
 
@@ -112,9 +131,16 @@ def is_false_positive_person(text: str) -> bool:
 
     normalized = _normalize(text)
 
-    # 1. Exact match against common non-name terms
+    # 1. Exact match against common non-name terms OR the global deny-list.
     if normalized in COMMON_NON_NAME_TERMS:
         return True
+    try:
+        from sandiraksa.detection.deny_list import is_denied
+
+        if is_denied(normalized):
+            return True
+    except Exception:
+        pass
 
     # 2. Contains invalid characters (digits, separators, brackets)
     if _INVALID_CHARS.search(text):
@@ -140,6 +166,13 @@ def is_false_positive_person(text: str) -> bool:
 
     # 3b. Every token is a common non-name term
     if all(tok in COMMON_NON_NAME_TERMS for tok in tokens):
+        return True
+
+    # 3b-strong. ANY token is a strong clinical/medical/action term -> reject.
+    #            Real names never contain these; NLP glues them on
+    #            (e.g. "Demam Berdarah", "Rina M alergi penisilin",
+    #             "Jangan berikan amoxicillin").
+    if any(tok in _STRONG_NON_NAME_TERMS for tok in tokens):
         return True
 
     # 3c. Contains a label fragment AND a non-name term
@@ -169,6 +202,66 @@ def _preceded_by_address_label(full_text: str, start: int, window: int = 40) -> 
         return False
     preceding = full_text[max(0, start - window):start].lower()
     return any(label in preceding for label in _ADDRESS_LABELS)
+
+
+# Leading words that NLP often glues onto a name (labels/verbs) but which are
+# not part of the name itself.
+_LEADING_NOISE_TOKENS: frozenset[str] = frozenset({
+    "pasien", "dokter", "dr", "nama", "cek", "lab", "kontrol", "penjamin",
+    "pengirim", "penerima", "kepada", "dari", "pic", "an", "atas", "kepada",
+    "perawat", "bapak", "bpk", "ibu", "sdr", "sdri", "tn", "ny",
+})
+
+
+def trim_person_span(text: str, start: int, end: int) -> tuple[str, int, int] | None:
+    """
+    Trim label/noise tokens from the edges of an NLP-detected PERSON span.
+
+    NLP (English spaCy) frequently over-extends a name to include a leading
+    label ("Pasien Budi S") or a trailing common word ("Joko W kontak"). This
+    strips such tokens from both ends using the known non-name term sets and
+    returns (clean_text, new_start, new_end), or None if nothing name-like
+    remains.
+
+    Offsets are relative to the same base as the input start/end.
+    """
+    raw = text[start:end] if 0 <= start < end <= len(text) else text
+    # Tokenize keeping track of offsets within `raw`.
+    tokens: list[tuple[str, int, int]] = []
+    for m in re.finditer(r"\S+", raw):
+        tokens.append((m.group(), m.start(), m.end()))
+    if not tokens:
+        return None
+
+    def _is_noise(tok: str) -> bool:
+        t = tok.strip(".,;:|()[]").lower()
+        if not t:
+            return True
+        return (
+            t in _LEADING_NOISE_TOKENS
+            or t in COMMON_NON_NAME_TERMS
+            or t in _LABEL_FRAGMENTS
+            or t in _PLACE_TOKENS
+        )
+
+    lo, hi = 0, len(tokens)
+    # Strip leading noise tokens.
+    while lo < hi and _is_noise(tokens[lo][0]):
+        lo += 1
+    # Strip trailing noise tokens.
+    while hi > lo and _is_noise(tokens[hi - 1][0]):
+        hi -= 1
+    if lo >= hi:
+        return None
+
+    new_start = start + tokens[lo][1]
+    new_end = start + tokens[hi - 1][2]
+    clean = text[new_start:new_end]
+
+    # Final sanity: must still look like a name (not a rejected phrase).
+    if is_false_positive_person(clean):
+        return None
+    return clean, new_start, new_end
 
 
 def filter_person_detections(detections: list, full_text: str = "") -> list:

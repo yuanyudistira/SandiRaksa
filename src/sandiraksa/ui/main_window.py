@@ -149,6 +149,11 @@ class MainWindow(QMainWindow):
         self._custom_patterns_action.triggered.connect(self._on_custom_patterns)
         settings_menu.addAction(self._custom_patterns_action)
 
+        # Deny-list / exclusion terms (global)
+        self._deny_list_action = QAction("Daftar Pengecualian...", self)
+        self._deny_list_action.triggered.connect(self._on_deny_list)
+        settings_menu.addAction(self._deny_list_action)
+
         # Help menu
         help_menu = menubar.addMenu(tr("menu.help"))
         assert help_menu is not None
@@ -522,7 +527,9 @@ class MainWindow(QMainWindow):
                                     field="metadata_enc"
                                 )
                                 metadata = json.loads(metadata_json)
-                                selected_columns = metadata.get("selected_columns")
+                                selected_columns = self._rehydrate_columns(
+                                    metadata.get("selected_columns")
+                                )
                                 detected_entities = metadata.get("detected_entities")
                             except Exception as meta_err:
                                 print(f"Error loading metadata for {fr.id}: {meta_err}")
@@ -757,7 +764,7 @@ class MainWindow(QMainWindow):
                 enabled_entity_types={
                     "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
                     "IP_ADDRESS", "URL", "IBAN_CODE",
-                    "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE",
+                    "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE", "ID_BPJS",
                     "PERSON", "DATE_OF_BIRTH",
                 },
                 min_confidence=0.5,
@@ -805,6 +812,9 @@ class MainWindow(QMainWindow):
         from sandiraksa.detection.recognizers.id_person import (
             IndonesianPersonRecognizer,
         )
+        from sandiraksa.detection.recognizers.id_bpjs_legacy import (
+            BPJSRecognizerLegacy,
+        )
 
         engine = DetectionEngine()
         engine.registry.register(RegexRecognizer())
@@ -812,6 +822,7 @@ class MainWindow(QMainWindow):
         engine.registry.register(NPWPRecognizer())
         engine.registry.register(KKRecognizer())
         engine.registry.register(IndonesianPhoneRecognizer())
+        engine.registry.register(BPJSRecognizerLegacy())
         # Context-aware recognizers for names and birth dates
         engine.registry.register(DateOfBirthRecognizer())
         engine.registry.register(IndonesianPersonRecognizer())
@@ -854,6 +865,10 @@ class MainWindow(QMainWindow):
                 col_indices = {c.column_index for c in cols}
                 col_headers = {c.column_index: c.header for c in cols}
                 col_types = {c.column_index: c.suggested_type for c in cols}
+                col_modes = {
+                    c.column_index: getattr(c, "protection_mode", "full_cell")
+                    for c in cols
+                }
                 
                 # Iterate rows (skip header)
                 for row_num, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
@@ -866,7 +881,13 @@ class MainWindow(QMainWindow):
                                 # Get column info
                                 header = col_headers.get(col_idx, "")
                                 suggested_type = col_types.get(col_idx)
-                                
+                                mode = col_modes.get(col_idx, "full_cell")
+
+                                # PII-only columns (free text / JSON) always run
+                                # per-substring detection, never whole-cell emit.
+                                if mode == "pii_only":
+                                    suggested_type = None
+
                                 # If column has suggested type (like PERSON for names), use it directly
                                 if suggested_type in ("PERSON", "ADDRESS", "MEDICAL_RECORD", "MEDICAL_INFO", "DATE_OF_BIRTH"):
                                     # These types need to be marked as-is (no regex detection needed)
@@ -882,13 +903,17 @@ class MainWindow(QMainWindow):
                                         "row": row_num,
                                     })
                                 else:
-                                    # For other types, run detection
+                                    # For other types, run detection. Narrative
+                                    # (PII-only) columns also scan names/DOB.
+                                    enabled = {
+                                        "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
+                                        "IP_ADDRESS", "URL", "IBAN_CODE",
+                                        "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE", "ID_BPJS",
+                                    }
+                                    if mode == "pii_only":
+                                        enabled |= {"PERSON", "DATE_OF_BIRTH"}
                                     config = DetectionConfig(
-                                        enabled_entity_types={
-                                            "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", 
-                                            "IP_ADDRESS", "URL", "IBAN_CODE",
-                                            "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE",
-                                        }
+                                        enabled_entity_types=enabled
                                     )
                                     context = DetectionContext(
                                         operation_id=str(uuid4()),
@@ -897,8 +922,25 @@ class MainWindow(QMainWindow):
                                         config=config,
                                     )
                                     
-                                    results = engine.analyze_text(value_str, context)
-                                    
+                                    results = list(engine.analyze_text(value_str, context))
+
+                                    # Chain global custom patterns (engine
+                                    # does not evaluate these).
+                                    try:
+                                        from sandiraksa.detection.custom_patterns import (
+                                            find_custom_matches,
+                                        )
+                                        for cm in find_custom_matches(value_str):
+                                            results.append(type("_M", (), {
+                                                "entity_type": cm.label,
+                                                "text": cm.value,
+                                                "start": cm.start,
+                                                "end": cm.end,
+                                                "score": 0.95,
+                                            })())
+                                    except Exception as _ce:
+                                        print(f"Custom pattern chain failed: {_ce}")
+
                                     if results:
                                         for result in results:
                                             findings.append({
@@ -1316,6 +1358,37 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             self.set_status(f"Error memproses {path.name}: {e}")
 
+    def _rehydrate_columns(self, columns_data):
+        """
+        Rebuild ColumnInfo objects from serialized metadata dicts.
+
+        Downstream scan/protect code accesses columns as objects
+        (col.sheet_name, col.protection_mode, ...), so reconstruct them here.
+        """
+        if not columns_data:
+            return columns_data
+        try:
+            from sandiraksa.ui.dialogs.column_selection import ColumnInfo
+
+            rebuilt = []
+            for d in columns_data:
+                if not isinstance(d, dict):
+                    rebuilt.append(d)  # already an object
+                    continue
+                rebuilt.append(ColumnInfo(
+                    sheet_name=d.get("sheet_name", ""),
+                    column_index=d.get("column_index", 0),
+                    column_letter=d.get("column_letter", ""),
+                    header=d.get("header", ""),
+                    suggested_type=d.get("suggested_type"),
+                    is_selected=True,
+                    protection_mode=d.get("protection_mode", "full_cell"),
+                ))
+            return rebuilt
+        except Exception as e:
+            print(f"Failed to rehydrate columns: {e}")
+            return columns_data
+
     def _add_file_to_project(self, path, selected_columns, project_view, detected_entities=None) -> str:
         """Add a single file to project and return file_id."""
         from sandiraksa.storage.repositories import FileRepository
@@ -1361,6 +1434,7 @@ class MainWindow(QMainWindow):
                             "column_index": getattr(col, 'column_index', 0),
                             "header": getattr(col, 'header', ''),
                             "suggested_type": getattr(col, 'suggested_type', 'PII'),
+                            "protection_mode": getattr(col, 'protection_mode', 'full_cell'),
                         }
                         for col in selected_columns
                     ]
@@ -1932,6 +2006,23 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Failed to reload custom patterns: {e}")
 
+    def _on_deny_list(self) -> None:
+        """Show the global deny-list (exclusion terms) editor dialog."""
+        from sandiraksa.ui.dialogs import DenyListDialog
+
+        # Keep a strong reference to prevent premature GC crash
+        self._deny_list_dialog = DenyListDialog(parent=self)
+        if self._deny_list_dialog.exec():
+            # Refresh cached deny-list so subsequent scans use the new set
+            try:
+                from sandiraksa.detection.deny_list import (
+                    reload_global_deny_list,
+                )
+
+                reload_global_deny_list()
+            except Exception as e:
+                print(f"Failed to reload deny-list: {e}")
+
     def set_status(self, message: str) -> None:
         """Update status bar message."""
         status_bar = self.statusBar()
@@ -2101,6 +2192,7 @@ class MainWindow(QMainWindow):
                     column_index=col.column_index,
                     column_name=col.header,
                     entity_type=col.suggested_type or "PII",
+                    protection_mode=getattr(col, "protection_mode", "full_cell"),
                 ))
             
             # Create protector with current project ID

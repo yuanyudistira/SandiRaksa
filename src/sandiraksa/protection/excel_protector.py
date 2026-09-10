@@ -33,6 +33,9 @@ class ColumnConfig:
     column_index: int  # 1-based
     column_name: str
     entity_type: str = "PII"  # Default entity type
+    # "full_cell" (replace whole cell with one token) or "pii_only" (detect and
+    # tokenize only PII substrings inside the cell, keeping the rest intact).
+    protection_mode: str = "full_cell"
 
 
 @dataclass
@@ -191,7 +194,11 @@ class ExcelProtector:
         cells_protected = 0
         col_idx = col_config.column_index
         entity_type = col_config.entity_type
-        
+        pii_only = col_config.protection_mode == "pii_only"
+
+        # For PII-only mode, build the detection engine once per column.
+        engine = self._build_engine() if pii_only else None
+
         # Start from row 2 (skip header)
         for row in range(2, ws.max_row + 1):
             cell = ws.cell(row=row, column=col_idx)
@@ -203,13 +210,19 @@ class ExcelProtector:
             
             # Convert to string for tokenization
             str_value = str(value).strip()
-            
-            # Get or create token
-            token = self._tokenizer.get_or_create_token(entity_type, str_value)
-            
-            # Replace cell value with token
-            cell.value = token
-            cells_protected += 1
+
+            if pii_only and engine is not None:
+                # Tokenize ONLY the detected PII substrings inside the cell,
+                # leaving surrounding free text / JSON structure intact.
+                new_value, hits = self._tokenize_pii_in_text(engine, str_value)
+                if hits > 0:
+                    cell.value = new_value
+                    cells_protected += 1
+            else:
+                # Replace the whole cell value with one token.
+                token = self._tokenizer.get_or_create_token(entity_type, str_value)
+                cell.value = token
+                cells_protected += 1
             
             # Update progress
             progress.current_row = row - 1
@@ -224,6 +237,158 @@ class ExcelProtector:
             progress_callback(progress)
         
         return cells_protected
+
+    def _build_engine(self):
+        """Build a detection engine with the standard recognizer set."""
+        from sandiraksa.detection.engine import DetectionEngine
+        from sandiraksa.detection.presidio_engine import RegexRecognizer
+        from sandiraksa.detection.recognizers import (
+            NIKRecognizer,
+            NPWPRecognizer,
+            KKRecognizer,
+            IndonesianPhoneRecognizer,
+            BPJSRecognizerLegacy,
+        )
+        from sandiraksa.detection.recognizers.id_dob import DateOfBirthRecognizer
+        from sandiraksa.detection.recognizers.id_person import (
+            IndonesianPersonRecognizer,
+        )
+
+        engine = DetectionEngine()
+        engine.registry.register(RegexRecognizer())
+        engine.registry.register(NIKRecognizer())
+        engine.registry.register(NPWPRecognizer())
+        engine.registry.register(KKRecognizer())
+        engine.registry.register(IndonesianPhoneRecognizer())
+        engine.registry.register(BPJSRecognizerLegacy())
+        engine.registry.register(DateOfBirthRecognizer())
+        engine.registry.register(IndonesianPersonRecognizer())
+
+        # NLP (Presidio/spaCy) for names inside free text / JSON. This is what
+        # lets "Budi Sanjaya" in a narrative cell be detected (the context-only
+        # IndonesianPersonRecognizer cannot see unlabeled names). Fail-safe: if
+        # Presidio/spaCy is unavailable, skip it and keep the rest working.
+        try:
+            from sandiraksa.detection.presidio_engine import PresidioRecognizer
+
+            engine.registry.register(
+                PresidioRecognizer(entities=["PERSON"], language="en")
+            )
+        except Exception as e:
+            logger.warning(f"Presidio NER unavailable, names in free text may be missed: {e}")
+
+        engine.initialize()
+        return engine
+
+    def _tokenize_pii_in_text(self, engine, text: str) -> tuple[str, int]:
+        """
+        Detect PII inside ``text`` and replace ONLY those substrings with tokens.
+
+        Returns (new_text, number_of_substitutions). Replacements are applied
+        right-to-left so earlier offsets stay valid.
+        """
+        from uuid import uuid4
+        from sandiraksa.detection.context import DetectionContext, DetectionConfig
+
+        config = DetectionConfig(
+            enabled_entity_types={
+                "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
+                "IP_ADDRESS", "URL", "IBAN_CODE",
+                "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE", "ID_BPJS",
+                "PERSON", "DATE_OF_BIRTH",
+            },
+            min_confidence=0.5,
+        )
+        context = DetectionContext(
+            operation_id=str(uuid4()),
+            file_id=str(uuid4()),
+            project_id=self._project_id,
+            config=config,
+        )
+
+        results = list(engine.analyze_text(text, context))
+
+        # Chain global custom patterns (e.g. Medical Record formats). The engine
+        # does not run these, so add them here as high-confidence hits.
+        results.extend(self._custom_pattern_hits(text))
+
+        # Trim NLP-detected PERSON spans that over-extend into label/noise words
+        # (e.g. "Pasien Budi S" -> "Budi S"). Drops spans that trim to nothing.
+        results = self._refine_person_spans(results, text)
+
+        if not results:
+            return text, 0
+
+        # Greedy non-overlap: prefer higher score; on conflict skip the loser.
+        chosen: list = []
+        occupied: list[tuple[int, int]] = []
+        for r in sorted(results, key=lambda r: (-r.score, r.start)):
+            if any(not (r.end <= s or r.start >= e) for s, e in occupied):
+                continue
+            occupied.append((r.start, r.end))
+            chosen.append(r)
+
+        new_text = text
+        for r in sorted(chosen, key=lambda r: r.start, reverse=True):
+            token = self._tokenizer.get_or_create_token(r.entity_type, r.text)
+            new_text = new_text[: r.start] + token + new_text[r.end :]
+
+        return new_text, len(chosen)
+
+    def _refine_person_spans(self, results: list, text: str) -> list:
+        """
+        Tighten NLP PERSON spans; drop those that trim away to non-names.
+
+        Non-PERSON results pass through unchanged.
+        """
+        try:
+            from sandiraksa.detection.recognizers.person_filter import (
+                trim_person_span,
+            )
+        except Exception:
+            return results
+
+        refined = []
+        for r in results:
+            if getattr(r, "entity_type", None) != "PERSON":
+                refined.append(r)
+                continue
+            trimmed = trim_person_span(text, r.start, r.end)
+            if trimmed is None:
+                continue  # trimmed to nothing -> not a name, drop
+            clean, ns, ne = trimmed
+            r.text = clean
+            r.start = ns
+            r.end = ne
+            refined.append(r)
+        return refined
+
+    def _custom_pattern_hits(self, text: str):
+        """
+        Return global custom-pattern matches as DetectionResult-like objects.
+
+        The detection engine does not evaluate user-defined custom patterns
+        (e.g. hospital Medical Record formats), so we chain them here. Given a
+        high score so they win overlap resolution against generic matches.
+        """
+        from sandiraksa.detection.context import DetectionResult
+
+        hits: list[DetectionResult] = []
+        try:
+            from sandiraksa.detection.custom_patterns import find_custom_matches
+
+            for m in find_custom_matches(text):
+                hits.append(DetectionResult(
+                    entity_type=m.label,
+                    start=m.start,
+                    end=m.end,
+                    text=m.value,
+                    score=0.95,
+                    recognizer_name="custom_pattern",
+                ))
+        except Exception as e:
+            logger.warning(f"Custom pattern detection failed: {e}")
+        return hits
 
 
 def generate_output_path(
