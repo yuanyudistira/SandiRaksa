@@ -29,27 +29,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
           pip install pyinstaller
-      
+          python -m spacy download en_core_web_sm
+
       - name: Build executable
         run: |
-          pyinstaller --name SandiRaksa `
-            --windowed `
-            --onefile `
-            --add-data "src/sandiraksa/resources;sandiraksa/resources" `
-            --hidden-import=PySide6.QtSvg `
-            --hidden-import=PySide6.QtXml `
-            --hidden-import=presidio_analyzer `
-            --hidden-import=presidio_anonymizer `
-            --hidden-import=spacy `
-            --hidden-import=openpyxl `
-            --hidden-import=docx `
-            --hidden-import=pptx `
-            --hidden-import=cryptography `
-            --hidden-import=keyring `
-            --hidden-import=charset_normalizer `
-            --collect-all=presidio_analyzer `
-            --noconfirm `
-            src/sandiraksa/__main__.py
+          pyinstaller SandiRaksa.spec --noconfirm
       
       - name: Get version
         id: version
