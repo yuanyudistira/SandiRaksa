@@ -29,9 +29,16 @@ MANIFEST
 # PyInstaller / Nuitka
 *.manifest
 *.spec
+!SandiRaksa.spec
 *.build/
 *.dist/
 *.onefile-build/
+
+# Windows signing / release pipeline outputs (Track B)
+signed-app/
+installer-output/
+signed-installer/
+release/
 
 # Installer logs
 pip-log.txt
@@ -179,6 +186,15 @@ tests/regression_documents/*.csv
 
 # NLP models (should be managed separately)
 src/sandiraksa/resources/nlp/models/
+
+# Internal planning & technical design docs (not for public repo)
+IMPROVEMENT_PLAN.md
+TECHNICAL_DESIGN.md
+technical-design.md
+SandiRaksa-Windows-Release-Pipeline.md
+requirement.md
+SPRINT_PLAN.md
+Technical20-20PII20Improvement.md
 
 # Logs
 logs/
