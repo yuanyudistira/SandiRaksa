@@ -66,8 +66,31 @@ class SandiRaksaApp:
         # Keep references to dialogs to prevent premature cleanup
         self._dialogs: list = []
 
+    def _set_app_user_model_id(self) -> None:
+        """
+        Set the Windows AppUserModelID so the taskbar uses our own icon.
+
+        Without an explicit AUMID, Windows groups the process under the host
+        (e.g. python.exe) and shows that host's icon in the taskbar instead of
+        the application icon. No-op on non-Windows platforms.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "SandiRaksa.App"
+            )
+        except Exception as e:
+            logger.warning(f"Could not set AppUserModelID: {e}")
+
     def _setup_application(self) -> QApplication:
         """Set up the Qt application with proper configuration."""
+        # Must run before the QApplication/first window so Windows groups the
+        # app under our own taskbar icon (not python.exe).
+        self._set_app_user_model_id()
+
         # Enable high DPI scaling
         QApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
