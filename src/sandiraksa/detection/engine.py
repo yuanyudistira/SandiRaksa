@@ -265,16 +265,26 @@ class DetectionEngine:
         results: list[DetectionResult],
         text: str = "",
     ) -> list[DetectionResult]:
-        """Remove common false-positive PERSON detections."""
+        """Remove common false-positive PERSON detections and denied terms."""
         try:
             from sandiraksa.detection.recognizers.person_filter import (
                 filter_person_detections,
             )
 
-            return filter_person_detections(results, text)
+            results = filter_person_detections(results, text)
         except Exception as e:
             logger.warning(f"Person filter failed, returning unfiltered: {e}")
-            return results
+
+        # Global deny-list: drop ANY detection whose text is user-excluded.
+        # Empty deny-list => no-op (nothing dropped).
+        try:
+            from sandiraksa.detection.deny_list import is_denied
+
+            results = [r for r in results if not is_denied(r.text)]
+        except Exception as e:
+            logger.warning(f"Deny-list filter failed, skipping: {e}")
+
+        return results
 
     def analyze_segment(
         self,
