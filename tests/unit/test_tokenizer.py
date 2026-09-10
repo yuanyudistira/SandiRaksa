@@ -64,6 +64,15 @@ def vault(key_manager):
 @pytest.fixture
 def tokenizer(db, vault):
     """Create a tokenizer for testing."""
+    # token_mappings.project_id is a FK to projects.id, so the project row
+    # must exist before tokens can be created.
+    from sandiraksa.storage.repositories import ProjectRepository
+
+    ProjectRepository(db).create_with_id(
+        project_id="test-project",
+        name_enc=b"test",
+        profile_id="default",
+    )
     repo = TokenMappingRepository(db)
     return Tokenizer("test-project", vault, repo)
 

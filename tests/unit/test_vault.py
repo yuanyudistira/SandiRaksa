@@ -217,9 +217,11 @@ class TestVaultManager:
     def test_delete_project_keys(self, manager: VaultManager, mock_key_manager):
         """Should delete project keys."""
         project_id = "delete-test"
-        manager.get_vault(project_id)
+        vault = manager.get_vault(project_id)
 
-        # Key exists
+        # The vault fetches the key lazily, so trigger key creation with an
+        # encrypt operation before asserting the key exists.
+        vault.encrypt("x", table="t", row_id="1", field="f")
         assert f"project_{project_id}" in mock_key_manager._keys
 
         manager.delete_project_keys(project_id)

@@ -55,12 +55,12 @@ class TestTokenParser:
 
     def test_find_all_unique(self, parser):
         """Should find unique tokens."""
-        text = "[[PERSON_ABC123]] and [[PERSON_ABC123]] again, plus [[EMAIL_XYZ789]]"
+        text = "[[PERSON_ABC123]] and [[PERSON_ABC123]] again, plus [[EMAIL_A2C789]]"
         unique = parser.find_all_unique(text)
 
         assert len(unique) == 2
         assert "[[PERSON_ABC123]]" in unique
-        assert "[[EMAIL_XYZ789]]" in unique
+        assert "[[EMAIL_A2C789]]" in unique
 
     def test_count_tokens(self, parser):
         """Should count all token occurrences."""

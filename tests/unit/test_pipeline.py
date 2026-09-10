@@ -28,22 +28,22 @@ class TestTreatmentPlan:
         finding1 = Finding(
             id="f1",
             file_id="file1",
-            operation_id="op1",
             entity_type="PERSON",
-            original_text="John Doe",
-            confidence_score=0.9,
-            location=DocumentLocation(element_type="cell", element_id="A1"),
+            detector="test",
+            detected_text="John Doe",
+            score=0.9,
+            location=DocumentLocation(element_type="cell", element_id="A1").to_dict(),
             review_action=ReviewAction.PENDING,
         )
         finding2 = Finding(
             id="f2",
             file_id="file1",
-            operation_id="op1",
             entity_type="EMAIL",
-            original_text="test@test.com",
-            confidence_score=0.95,
-            location=DocumentLocation(element_type="cell", element_id="B1"),
-            review_action=ReviewAction.ACCEPT,
+            detector="test",
+            detected_text="test@test.com",
+            score=0.95,
+            location=DocumentLocation(element_type="cell", element_id="B1").to_dict(),
+            review_action=ReviewAction.PROTECT,
         )
 
         plan.add_finding(finding1)
@@ -60,11 +60,11 @@ class TestTreatmentPlan:
         finding = Finding(
             id="f1",
             file_id="file1",
-            operation_id="op1",
             entity_type="PERSON",
-            original_text="John",
-            confidence_score=0.9,
-            location=DocumentLocation(element_type="cell", element_id="A1"),
+            detector="test",
+            detected_text="John",
+            score=0.9,
+            location=DocumentLocation(element_type="cell", element_id="A1").to_dict(),
             review_action=ReviewAction.PENDING,
         )
         plan.add_finding(finding)
@@ -102,6 +102,34 @@ class TestPipelineProgress:
 
 class TestProtectionPipeline:
     """Tests for ProtectionPipeline."""
+
+    @pytest.fixture(autouse=True)
+    def _temp_db(self, tmp_path):
+        """Point the global DB at a temp file and create the test project.
+
+        The pipeline tokenizes findings, and token_mappings.project_id is a FK
+        to projects.id, so the project row must exist.
+        """
+        import sandiraksa.storage.database as db_mod
+        from sandiraksa.storage.database import Database
+        from sandiraksa.storage.repositories import ProjectRepository
+        from sandiraksa.protection.tokenizer import TokenizerFactory
+
+        old_db = db_mod._database
+        database = Database(tmp_path / "pipeline_test.db")
+        database.initialize()
+        db_mod._database = database
+        ProjectRepository(database).create_with_id(
+            project_id="test-project",
+            name_enc=b"test",
+            profile_id="default",
+        )
+        # Clear any cached tokenizers bound to a previous DB.
+        TokenizerFactory.close_all()
+        yield
+        database.close()
+        db_mod._database = old_db
+        TokenizerFactory.close_all()
 
     @pytest.fixture
     def mock_handler(self):
@@ -192,17 +220,17 @@ class TestProtectionPipeline:
         finding = Finding(
             id="f1",
             file_id="file1",
-            operation_id="op1",
             entity_type="EMAIL_ADDRESS",
-            original_text="test@test.com",
-            confidence_score=0.95,
+            detector="test",
+            detected_text="test@test.com",
+            score=0.95,
             location=DocumentLocation(
                 element_type="cell",
                 element_id="B1",
                 row_number=0,
                 column_number=1,
-            ),
-            review_action=ReviewAction.ACCEPT,
+            ).to_dict(),
+            review_action=ReviewAction.PROTECT,
         )
         plan.add_finding(finding)
 

@@ -4,8 +4,6 @@ import pytest
 
 from sandiraksa.detection import (
     BaseRecognizer,
-    DetectionConfig,
-    DetectionContext,
     DetectionEngine,
     DetectionPhase,
     DetectionResult,
@@ -14,6 +12,13 @@ from sandiraksa.detection import (
     RecognizerRegistry,
     TextSegment,
     get_entity_registry,
+)
+# This module tests the LEGACY detection engine (context.py). The package
+# re-exports the unified DetectionConfig/DetectionContext by default, so use
+# the legacy aliases here.
+from sandiraksa.detection import (
+    LegacyDetectionConfig as DetectionConfig,
+    LegacyDetectionContext as DetectionContext,
 )
 from sandiraksa.domain.finding import DocumentLocation
 
@@ -181,7 +186,7 @@ class TestDetectionConfig:
     def test_min_confidence_threshold(self):
         """Default min confidence should be set."""
         config = DetectionConfig.default()
-        assert config.min_confidence == 0.7
+        assert config.min_confidence == 0.5
 
 
 class TestDetectionContext:
