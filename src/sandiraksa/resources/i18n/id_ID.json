@@ -4,6 +4,9 @@
     "tagline": "Lindungi Data Sebelum Berbagi ke AI",
     "local_processing": "🔒 Semua pemrosesan dilakukan secara lokal"
   },
+  "footer": {
+    "disclaimer": "⚠️ Setelah treatment, Anda wajib melakukan re-assessment terhadap hasil akhir dan mengklasifikasikan ulang data yang telah diolah sebelum digunakan."
+  },
   "menu": {
     "file": "&File",
     "new_project": "Proyek &Baru",

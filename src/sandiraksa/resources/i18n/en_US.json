@@ -4,6 +4,9 @@
     "tagline": "Protect Your Data Before Sharing with AI",
     "local_processing": "🔒 All processing is done locally"
   },
+  "footer": {
+    "disclaimer": "⚠️ After treatment, you must re-assess the final output and re-classify the treated data before use."
+  },
   "menu": {
     "file": "&File",
     "new_project": "&New Project",

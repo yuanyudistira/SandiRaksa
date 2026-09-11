@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QLabel,
     QMainWindow,
     QStackedWidget,
     QWidget,
@@ -259,6 +260,15 @@ class MainWindow(QMainWindow):
         assert status_bar is not None
         status_bar.showMessage(tr("status.ready"))
 
+        # Persistent compliance disclaimer shown in the footer. Added as a
+        # permanent widget so transient showMessage() calls don't clear it.
+        self._disclaimer_label = QLabel(tr("footer.disclaimer"))
+        self._disclaimer_label.setWordWrap(False)
+        self._disclaimer_label.setStyleSheet(
+            "color: #b45309; font-weight: 600; padding: 0 8px;"
+        )
+        status_bar.addPermanentWidget(self._disclaimer_label)
+
     def _connect_language_changes(self) -> None:
         """Connect to language change signal."""
         self._translator.language_changed.connect(self._on_language_changed)
@@ -285,6 +295,8 @@ class MainWindow(QMainWindow):
         status_bar = self.statusBar()
         if status_bar:
             status_bar.showMessage(tr("status.ready"))
+        if getattr(self, "_disclaimer_label", None) is not None:
+            self._disclaimer_label.setText(tr("footer.disclaimer"))
 
     def _update_language_check(self) -> None:
         """Update language menu check marks."""
