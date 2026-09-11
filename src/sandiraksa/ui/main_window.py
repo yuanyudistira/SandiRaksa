@@ -173,10 +173,6 @@ class MainWindow(QMainWindow):
         self._contact_action.triggered.connect(self._show_contact)
         help_menu.addAction(self._contact_action)
 
-        self._donate_action = QAction(tr("menu.donate"), self)
-        self._donate_action.triggered.connect(self._show_donate)
-        help_menu.addAction(self._donate_action)
-
         help_menu.addSeparator()
 
         self._about_action = QAction(tr("menu.about"), self)
@@ -277,7 +273,6 @@ class MainWindow(QMainWindow):
         self._help_action.setText(tr("menu.help_contents"))
         self._docs_action.setText(tr("menu.documentation"))
         self._contact_action.setText(tr("menu.contact"))
-        self._donate_action.setText(tr("menu.donate"))
         self._about_action.setText(tr("menu.about"))
 
     def _update_status_bar(self) -> None:
@@ -1980,13 +1975,6 @@ class MainWindow(QMainWindow):
         from sandiraksa.ui.dialogs import ContactDialog
 
         dialog = ContactDialog(parent=self)
-        dialog.exec()
-
-    def _show_donate(self) -> None:
-        """Show donate dialog."""
-        from sandiraksa.ui.dialogs import DonateDialog
-
-        dialog = DonateDialog(parent=self)
         dialog.exec()
 
     def _on_custom_patterns(self) -> None:

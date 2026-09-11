@@ -49,7 +49,7 @@ class ContactDialog(QDialog):
         # Description
         desc = QLabel(
             "Punya pertanyaan, saran, atau menemukan bug?\n"
-            "Hubungi kami melalui GitHub."
+            "Hubungi kami melalui email."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet(f"color: {ColorPalette.GRAY_600.value};")
@@ -58,18 +58,20 @@ class ContactDialog(QDialog):
 
         layout.addSpacing(SPACING.MD)
 
-        # GitHub button
-        github_btn = QPushButton("🐙 GitHub: github.com/yuanyudistira/sandiraksa")
-        github_btn.setStyleSheet(
+        # Email button
+        email_btn = QPushButton("✉️ infosec.shg@siloamhospitals.com")
+        email_btn.setStyleSheet(
             f"padding: {SPACING.MD}px; "
             f"font-size: {FONT_SIZE.MD}px; "
             f"text-align: left;"
         )
-        github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        github_btn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl("https://github.com/yuanyudistira/sandiraksa"))
+        email_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        email_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("mailto:infosec.shg@siloamhospitals.com")
+            )
         )
-        layout.addWidget(github_btn)
+        layout.addWidget(email_btn)
 
         layout.addStretch()
 

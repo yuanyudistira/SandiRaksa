@@ -1,0 +1,189 @@
+name: Windows Release
+
+# Tag-driven, signed Windows release:
+#   build (spec) -> sign app -> build installer -> sign installer
+#   -> verify -> checksum -> publish GitHub Release
+#
+# Requires (configure in the "production-signing" GitHub Environment):
+#   secret : SIGNPATH_API_TOKEN
+#   vars   : SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG,
+#            SIGNPATH_SIGNING_POLICY_SLUG,
+#            SIGNPATH_APP_ARTIFACT_CONFIG_SLUG,
+#            SIGNPATH_INSTALLER_ARTIFACT_CONFIG_SLUG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-sign-release:
+    name: Build, Sign and Release Windows
+    runs-on: windows-latest
+    environment:
+      name: production-signing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve application version
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
+              throw "Release tag '$tag' does not match the expected format: vX.Y.Z"
+          }
+          $version = $Matches["version"]
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "SETUP_FILENAME=SandiRaksa-Setup-$version.exe" >> $env:GITHUB_ENV
+          Write-Host "Release version: $version"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          if (Test-Path "requirements-build.txt") {
+              pip install -r requirements-build.txt
+          }
+          # spaCy English model must be present so the frozen app can load NLP.
+          python -m spacy download en_core_web_sm
+
+      - name: Run tests
+        shell: powershell
+        run: |
+          python -m pytest tests/unit -q
+
+      - name: Build SandiRaksa application
+        shell: powershell
+        run: |
+          pyinstaller --clean --noconfirm SandiRaksa.spec
+          if (-not (Test-Path "dist\SandiRaksa.exe")) {
+              throw "Expected executable was not generated: dist\SandiRaksa.exe"
+          }
+
+      - name: Upload unsigned application
+        id: upload-unsigned-app
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandiraksa-app-unsigned
+          path: dist/SandiRaksa.exe
+          if-no-files-found: error
+
+      - name: Sign SandiRaksa.exe
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ vars.SIGNPATH_ORGANIZATION_ID }}"
+          project-slug: "${{ vars.SIGNPATH_PROJECT_SLUG }}"
+          signing-policy-slug: "${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}"
+          artifact-configuration-slug: "${{ vars.SIGNPATH_APP_ARTIFACT_CONFIG_SLUG }}"
+          github-artifact-id: "${{ steps.upload-unsigned-app.outputs.artifact-id }}"
+          wait-for-completion: true
+          output-artifact-directory: "signed-app"
+
+      - name: Verify application Authenticode signature
+        shell: powershell
+        run: |
+          $path = "signed-app\SandiRaksa.exe"
+          if (-not (Test-Path $path)) { throw "Signed application not found: $path" }
+          $signature = Get-AuthenticodeSignature $path
+          Write-Host "Status    : $($signature.Status)"
+          Write-Host "Signer    : $($signature.SignerCertificate.Subject)"
+          if ($signature.Status -ne "Valid") {
+              throw "SandiRaksa.exe signature validation failed: $($signature.Status)"
+          }
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) { throw "ISCC.exe was not found after installing Inno Setup." }
+          Write-Host "Inno Setup compiler: $($iscc.Source)"
+
+      - name: Build Windows installer (from signed app)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
+          $signedAppDir = (Resolve-Path "signed-app").Path
+          & ISCC.exe "/DAppVersion=$env:APP_VERSION" "/DSignedAppDir=$signedAppDir" "installer\SandiRaksa.iss"
+          $installer = "installer-output\$env:SETUP_FILENAME"
+          if (-not (Test-Path $installer)) { throw "Expected installer was not generated: $installer" }
+          Write-Host "Installer generated: $installer"
+
+      - name: Upload unsigned installer
+        id: upload-unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandiraksa-installer-unsigned
+          path: installer-output/${{ env.SETUP_FILENAME }}
+          if-no-files-found: error
+
+      - name: Sign SandiRaksa installer
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ vars.SIGNPATH_ORGANIZATION_ID }}"
+          project-slug: "${{ vars.SIGNPATH_PROJECT_SLUG }}"
+          signing-policy-slug: "${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}"
+          artifact-configuration-slug: "${{ vars.SIGNPATH_INSTALLER_ARTIFACT_CONFIG_SLUG }}"
+          github-artifact-id: "${{ steps.upload-unsigned-installer.outputs.artifact-id }}"
+          wait-for-completion: true
+          output-artifact-directory: "signed-installer"
+
+      - name: Verify installer Authenticode signature
+        shell: powershell
+        run: |
+          $path = "signed-installer\$env:SETUP_FILENAME"
+          if (-not (Test-Path $path)) { throw "Signed installer not found: $path" }
+          $signature = Get-AuthenticodeSignature $path
+          Write-Host "Status    : $($signature.Status)"
+          Write-Host "Signer    : $($signature.SignerCertificate.Subject)"
+          if ($signature.Status -ne "Valid") {
+              throw "Installer signature validation failed: $($signature.Status)"
+          }
+
+      - name: Prepare release artifacts and checksum
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          Copy-Item "signed-installer\$env:SETUP_FILENAME" "release\$env:SETUP_FILENAME" -Force
+          $hash = (Get-FileHash "release\$env:SETUP_FILENAME" -Algorithm SHA256).Hash.ToLower()
+          "$hash *$env:SETUP_FILENAME" | Set-Content -Path "release\SHA256SUMS.txt" -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+      - name: Final release validation
+        shell: powershell
+        run: |
+          $installer = "release\$env:SETUP_FILENAME"
+          $signature = Get-AuthenticodeSignature $installer
+          if ($signature.Status -ne "Valid") { throw "Final release installer is not validly signed." }
+          if (-not (Test-Path "release\SHA256SUMS.txt")) { throw "SHA256SUMS.txt is missing." }
+          Write-Host "Final release validation passed."
+
+      - name: Publish GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "release\$env:SETUP_FILENAME" `
+            "release\SHA256SUMS.txt" `
+            --verify-tag `
+            --generate-notes `
+            --title "SandiRaksa ${{ github.ref_name }}"

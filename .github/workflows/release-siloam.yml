@@ -1,0 +1,66 @@
+name: SILOAM Windows Build (unsigned)
+
+# Unsigned Windows EXE build for the SILOAM-branded variant.
+#
+# Builds dist\SandiRaksa.exe from SandiRaksa.spec (which already references the
+# SILOAM icon) and publishes it as a downloadable workflow artifact.
+#
+# No code signing is performed. Add the SignPath steps from
+# release-windows.yml once signing approval is in place.
+
+on:
+  push:
+    branches:
+      - siloam
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SILOAM Windows EXE (unsigned)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          if (Test-Path "requirements-build.txt") {
+              pip install -r requirements-build.txt
+          } else {
+              pip install pyinstaller
+          }
+          # spaCy English model must be present so the frozen app can load NLP.
+          python -m spacy download en_core_web_sm
+
+      - name: Build SandiRaksa application
+        shell: powershell
+        run: |
+          pyinstaller --clean --noconfirm SandiRaksa.spec
+          if (-not (Test-Path "dist\SandiRaksa.exe")) {
+              throw "Expected executable was not generated: dist\SandiRaksa.exe"
+          }
+          $info = Get-Item "dist\SandiRaksa.exe"
+          $sizeMB = [math]::Round($info.Length / 1MB, 2)
+          Write-Host "Built dist\SandiRaksa.exe ($sizeMB MB)"
+
+      - name: Upload SILOAM EXE (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SandiRaksa-siloam-unsigned
+          path: dist/SandiRaksa.exe
+          if-no-files-found: error

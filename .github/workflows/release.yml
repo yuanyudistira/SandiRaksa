@@ -1,10 +1,11 @@
-name: Build and Release
+name: Build (Unsigned, Manual)
 
+# Retired as the tag-driven release path. The signed release pipeline is
+# .github/workflows/release-windows.yml (triggered by v* tags).
+# This workflow is kept for manual, UNSIGNED debug builds only and no longer
+# runs on tags, so the two do not both fire on a v* tag.
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags like v0.2.0
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual only — produces an unsigned .exe for debugging
 
 permissions:
   contents: write

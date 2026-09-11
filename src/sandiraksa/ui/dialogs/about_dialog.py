@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from sandiraksa.app.i18n import tr
+from sandiraksa.resources import resource_path
 from sandiraksa.ui.theme import ColorPalette, FONT_SIZE, SPACING
 from sandiraksa.version import __version__
 
@@ -42,15 +44,23 @@ class AboutDialog(QDialog):
         layout.setSpacing(SPACING.LG)
         layout.setContentsMargins(SPACING.XL, SPACING.XL, SPACING.XL, SPACING.XL)
 
-        # App icon/name
-        title = QLabel("🛡️ SandiRaksa")
-        title.setStyleSheet(
-            f"font-size: {FONT_SIZE.TITLE}px; "
-            f"font-weight: bold; "
-            f"color: {ColorPalette.PRIMARY.value};"
-        )
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        # Branded logo (SILOAM). Falls back to text if the image is missing.
+        logo = QLabel()
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pixmap = QPixmap(str(resource_path("icons/sandiraksa.png")))
+        if not pixmap.isNull():
+            pixmap = pixmap.scaledToHeight(
+                96, Qt.TransformationMode.SmoothTransformation
+            )
+            logo.setPixmap(pixmap)
+        else:
+            logo.setText("SandiRaksa")
+            logo.setStyleSheet(
+                f"font-size: {FONT_SIZE.TITLE}px; "
+                f"font-weight: bold; "
+                f"color: {ColorPalette.PRIMARY.value};"
+            )
+        layout.addWidget(logo)
 
         # Version
         version_label = QLabel(tr("about.version", version=__version__))

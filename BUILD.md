@@ -360,3 +360,63 @@ echo "Done! Output: dist/SandiRaksa"
 - Python: 3.11+
 - PySide6: 6.6+
 - Build Date: September 2026
+
+
+---
+
+## 🔏 Signed Release Setup (SignPath) — one-time manual steps
+
+The signed Windows release runs via `.github/workflows/release-windows.yml`
+(triggered by a `v*` tag). It builds the app, signs the EXE, builds the
+installer, signs the installer, verifies signatures, generates a checksum, and
+publishes the GitHub Release. Before the first signed release, complete these
+**manual** steps (they cannot be automated in this repo):
+
+### B2 — SignPath Foundation onboarding
+
+1. Apply to SignPath Foundation (free OSS code signing). Approval is manual and
+   can take several days — the repo must be public with an OSI license (MIT ✓).
+2. Authorize the SignPath GitHub App for this repository.
+3. Set **Trusted Build System = GitHub.com**.
+4. Create a SignPath project **SandiRaksa** with:
+   - Signing policy: `release-signing` (enable required approval).
+   - Artifact config `windows-app-v1` — signs `SandiRaksa.exe` inside the
+     GitHub artifact ZIP.
+   - Artifact config `windows-installer-v1` — signs
+     `SandiRaksa-Setup-<version>.exe` inside the artifact ZIP.
+5. Obtain the CI **API token**.
+
+### B3 — GitHub environment, secret, and variables
+
+Create an Environment named **`production-signing`** (Settings → Environments)
+with a **required reviewer**, then add:
+
+| Kind | Name | Example value |
+|------|------|---------------|
+| Secret | `SIGNPATH_API_TOKEN` | *(from SignPath)* |
+| Variable | `SIGNPATH_ORGANIZATION_ID` | *(from SignPath)* |
+| Variable | `SIGNPATH_PROJECT_SLUG` | `SandiRaksa` |
+| Variable | `SIGNPATH_SIGNING_POLICY_SLUG` | `release-signing` |
+| Variable | `SIGNPATH_APP_ARTIFACT_CONFIG_SLUG` | `windows-app-v1` |
+| Variable | `SIGNPATH_INSTALLER_ARTIFACT_CONFIG_SLUG` | `windows-installer-v1` |
+
+Never commit a signing key (`*.pfx`, `*.p12`, private keys). The workflow only
+holds the API token, and only inside the protected `production-signing`
+environment.
+
+### Cutting a signed release
+
+```bash
+# bump version in pyproject.toml and src/sandiraksa/version.py first
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+The tag triggers `release-windows.yml`; approve the `production-signing`
+deployment when prompted. The old `release.yml` is retired to manual-only
+(`workflow_dispatch`) and no longer fires on tags, so only the signed pipeline
+runs on a `v*` tag.
+
+> **SmartScreen:** a valid signature fixes the "unknown publisher" warning but
+> does not guarantee zero SmartScreen prompts on day one — reputation builds
+> over time. Never instruct users to disable SmartScreen.
