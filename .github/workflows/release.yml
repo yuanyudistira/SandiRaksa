@@ -45,7 +45,20 @@ jobs:
             VERSION="dev"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-      
+
+      - name: Build Windows installer (unsigned)
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) { throw "ISCC.exe was not found after installing Inno Setup." }
+          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
+          $appDir = (Resolve-Path "dist").Path
+          & ISCC.exe "/DAppVersion=${{ steps.version.outputs.version }}" "/DSignedAppDir=$appDir" "installer\SandiRaksa.iss"
+          $setup = "installer-output\SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe"
+          if (-not (Test-Path $setup)) { throw "Expected installer was not generated: $setup" }
+          Write-Host "Built installer: $setup"
+
       - name: Rename executable
         run: |
           Move-Item dist/SandiRaksa.exe "dist/SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe"
@@ -54,7 +67,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: dist/*.exe
+          path: |
+            dist/SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe
+            installer-output/SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe
           retention-days: 5
 
   create-release:
@@ -95,16 +110,21 @@ jobs:
             
             ### Downloads
             
-            | Platform | Architecture | File |
-            |----------|--------------|------|
-            | Windows | x64 | `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe` |
+            | Platform | Type | File |
+            |----------|------|------|
+            | Windows x64 | Installer (recommended) | `SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe` |
+            | Windows x64 | Portable executable | `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe` |
             
             ### Installation
             
-            **Windows:**
-            1. Download `.exe` file
-            2. Run the executable
-            3. If Windows Defender warns, click "More info" → "Run anyway"
+            **Windows (installer, recommended):**
+            1. Download `SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe`
+            2. Run it. It installs to Program Files and creates Start Menu, desktop, and Quick Launch shortcuts.
+            3. If Windows Defender warns, click "More info" → "Run anyway" (the build is unsigned).
+            
+            **Windows (portable):**
+            1. Download `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe`
+            2. Run it directly (no installation, no shortcuts).
             
             ### What's New
             
