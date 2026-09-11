@@ -40,9 +40,13 @@ if hasattr(sys.stderr, 'fileno'):
     except (AttributeError, io.UnsupportedOperation):
         pass  # Skip if running in --noconsole mode
 
-# Disable automatic garbage collection to prevent heap corruption with PySide6
-# GC will be triggered manually during idle periods
-gc.disable()
+# Garbage collection is kept ENABLED. Scanning now runs on a dedicated
+# worker thread (see sandiraksa.ui.scan_worker), so the GUI event loop is no
+# longer re-entered mid-scan via processEvents(). That re-entrancy, combined
+# with a disabled collector, was the source of the intermittent Windows heap
+# corruption (STATUS_HEAP_CORRUPTION, 0xC0000374). With re-entrancy removed it
+# is both safe and desirable to let Python reclaim cyclic garbage normally.
+gc.enable()
 
 
 class SandiRaksaApp:
@@ -173,7 +177,9 @@ class SandiRaksaApp:
 
         result = self._app.exec()
         
-        # Force exit to avoid PySide6 cleanup crash on Windows
+        # Hard-exit to sidestep occasional PySide6/Qt teardown crashes on
+        # Windows during interpreter shutdown (general safeguard, unrelated to
+        # the scan-thread fix).
         import sys
         sys.exit(result)
 
