@@ -1,12 +1,16 @@
 name: SILOAM Windows Build (unsigned)
 
-# Unsigned Windows EXE build for the SILOAM-branded variant.
+# Unsigned Windows build for the SILOAM-branded variant, ready to deploy via
+# an MSFT Intune / Company Portal package.
 #
-# Builds dist\SandiRaksa.exe from SandiRaksa.spec (which already references the
-# SILOAM icon) and publishes it as a downloadable workflow artifact.
+# Produces two downloadable artifacts:
+#   * SandiRaksa-siloam-unsigned          -> dist\SandiRaksa.exe (raw app)
+#   * SandiRaksa-siloam-installer-unsigned-> SandiRaksa-Setup-<version>.exe
+#     (Inno Setup installer built from the unsigned dist\ app)
 #
-# No code signing is performed. Add the SignPath steps from
-# release-windows.yml once signing approval is in place.
+# No code signing is performed. Distributing via Company Portal avoids the
+# SmartScreen/Defender prompts that unsigned binaries normally trigger for
+# end users. Add signing later (see release-windows.yml) once approved.
 
 on:
   push:
@@ -19,7 +23,7 @@ permissions:
 
 jobs:
   build:
-    name: Build SILOAM Windows EXE (unsigned)
+    name: Build SILOAM Windows EXE + installer (unsigned)
     runs-on: windows-latest
 
     steps:
@@ -47,6 +51,20 @@ jobs:
           # spaCy English model must be present so the frozen app can load NLP.
           python -m spacy download en_core_web_sm
 
+      - name: Resolve application version
+        shell: powershell
+        run: |
+          $verLine = Select-String -Path "src\sandiraksa\version.py" `
+              -Pattern '__version__\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if ($verLine) {
+              $version = $verLine.Matches[0].Groups[1].Value
+          } else {
+              $version = "0.0.0-dev"
+          }
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "SETUP_FILENAME=SandiRaksa-Setup-$version.exe" >> $env:GITHUB_ENV
+          Write-Host "App version: $version"
+
       - name: Build SandiRaksa application
         shell: powershell
         run: |
@@ -63,4 +81,34 @@ jobs:
         with:
           name: SandiRaksa-siloam-unsigned
           path: dist/SandiRaksa.exe
+          if-no-files-found: error
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) { throw "ISCC.exe was not found after installing Inno Setup." }
+          Write-Host "Inno Setup compiler: $($iscc.Source)"
+
+      - name: Build Windows installer (from unsigned dist app)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
+          # Point the installer at the unsigned dist/ build (no signing step).
+          $appDir = (Resolve-Path "dist").Path
+          & ISCC.exe "/DAppVersion=$env:APP_VERSION" "/DSignedAppDir=$appDir" "installer\SandiRaksa.iss"
+          $installer = "installer-output\$env:SETUP_FILENAME"
+          if (-not (Test-Path $installer)) {
+              throw "Expected installer was not generated: $installer"
+          }
+          $info = Get-Item $installer
+          $sizeMB = [math]::Round($info.Length / 1MB, 2)
+          Write-Host "Built installer: $installer ($sizeMB MB)"
+
+      - name: Upload SILOAM installer (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SandiRaksa-siloam-installer-unsigned
+          path: installer-output/${{ env.SETUP_FILENAME }}
           if-no-files-found: error
