@@ -5,6 +5,14 @@ All notable changes to SandiRaksa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-11
+
+### Fixed
+- **Crash on large files (heap corruption)** - Scanning now runs on a dedicated background thread instead of the GUI thread. The previous approach re-entered the Qt event loop mid-scan (via `processEvents()` and a self-rescheduling timer) with garbage collection disabled, which caused intermittent Windows heap corruption (`0xC0000374`), especially on large Excel files with many columns. Garbage collection is re-enabled and the detection engine/context objects are now reused across cells for large-file efficiency.
+
+### Added
+- **Compliance disclaimer footer** - A persistent footer reminds users that, after treatment, the final output must be re-assessed and the treated data re-classified before use.
+
 ## [1.0.1] - 2026-09-09
 
 ### Fixed

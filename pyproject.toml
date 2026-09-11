@@ -1,6 +1,6 @@
 [project]
 name = "sandiraksa"
-version = "1.0.3"
+version = "1.0.4"
 description = "SandiRaksa — Local Privacy Gateway for AI"
 readme = "README.md"
 license = { text = "MIT" }
