@@ -81,6 +81,9 @@ class MainWindow(QMainWindow):
         self._current_project_id: str | None = None
         # Keep reference to active dialog to prevent premature cleanup
         self._active_dialog = None
+        # Background scan worker + its thread (None when no scan is running).
+        self._scan_thread = None
+        self._scan_worker = None
 
         self._setup_window()
         self._create_menus()
@@ -586,496 +589,99 @@ class MainWindow(QMainWindow):
             self.set_status(f"Gagal menghapus project: {e}")
 
     def _on_scan_requested(self) -> None:
-        """Handle scan request."""
-        from PySide6.QtCore import QTimer
-        
-        # Get files from project view
+        """Handle scan request by starting a background scan worker.
+
+        Scanning runs on a dedicated QThread so the GUI event loop is never
+        blocked or re-entered mid-scan. Results are delivered via queued
+        signals. This replaced the old processEvents()/self-rescheduling
+        QTimer loop that caused heap corruption on large files.
+        """
+        # Guard against overlapping scans (re-entrancy / double-click).
+        if getattr(self, "_scan_thread", None) is not None:
+            print("DEBUG: Scan already in progress, ignoring request")
+            return
+
         project_view = self._pages.get(Page.PROJECT_VIEW)
         if not project_view or not project_view._files:
             self.set_status("No files to scan")
             return
-        
+
         files = project_view._files.copy()
-        
-        # Setup scan progress screen
+
         scan_progress = self._pages.get(Page.SCAN_PROGRESS)
         if scan_progress:
             scan_progress.set_files(files)
-        
-        # Navigate to progress screen
+
         self.navigate_to(Page.SCAN_PROGRESS)
-        
-        # Start scanning in background using QTimer to not block UI
-        self._scan_files = files
-        self._scan_index = 0
+
         self._scan_findings = []
-        
-        # Process first file after short delay
-        QTimer.singleShot(100, self._scan_next_file)
-    
-    def _scan_next_file(self) -> None:
-        """Scan the next file in queue."""
-        from PySide6.QtCore import QTimer
-        from PySide6.QtWidgets import QApplication
-        from pathlib import Path
-        from uuid import uuid4
-        
-        print(f"DEBUG: _scan_next_file called, index={self._scan_index}, total={len(self._scan_files)}")
-        
-        if self._scan_index >= len(self._scan_files):
-            # All files scanned, show results
-            print("DEBUG: All files scanned, calling _on_scan_finished")
-            self._on_scan_finished()
-            return
-        
-        file_info = self._scan_files[self._scan_index]
-        file_id = file_info["id"]
-        file_path = file_info.get("path", "")
-        print(f"DEBUG: Scanning file {self._scan_index + 1}: {file_path}")
-        
-        # Update status to scanning
+        self._start_scan_worker(files)
+
+    def _start_scan_worker(self, files: list[dict]) -> None:
+        """Create the worker + thread and wire up queued signals."""
+        from PySide6.QtCore import QThread
+        from sandiraksa.ui.scan_worker import ScanWorker
+
+        self._scan_thread = QThread(self)
+        self._scan_worker = ScanWorker(files, self._current_project_id)
+        self._scan_worker.moveToThread(self._scan_thread)
+
+        # Run when the thread starts; the worker signals completion itself.
+        self._scan_thread.started.connect(self._scan_worker.run)
+        self._scan_worker.file_started.connect(self._on_worker_file_started)
+        self._scan_worker.file_finished.connect(self._on_worker_file_finished)
+        self._scan_worker.file_error.connect(self._on_worker_file_error)
+        self._scan_worker.all_finished.connect(self._on_worker_all_finished)
+
+        self._scan_thread.start()
+
+    def _on_worker_file_started(self, file_id: str) -> None:
+        """A file scan has started (GUI thread)."""
         scan_progress = self._pages.get(Page.SCAN_PROGRESS)
         if scan_progress:
             scan_progress.update_file_status(file_id, "scanning")
-        
-        # Process events to update UI
-        QApplication.processEvents()
-        
-        # Perform actual scan
-        findings_count = 0
-        try:
-            if file_path and Path(file_path).exists():
-                print(f"DEBUG: File exists, starting scan...")
-                
-                # Get selected columns if available (for Excel files)
-                selected_columns = file_info.get("selected_columns")
-                
-                findings = self._scan_file(file_path, selected_columns)
-                findings_count = len(findings)
-                print(f"DEBUG: Found {findings_count} findings in {file_path}")
-                
-                # Store findings with file info
-                # Group by type and take samples from each for diversity
-                from collections import defaultdict
-                
-                findings_by_type = defaultdict(list)
-                for finding in findings:
-                    findings_by_type[finding["entity_type"]].append(finding)
-                
-                # Take up to max_per_type from each type, max total 5000
-                max_per_type = 1000
-                max_total = 10000
-                selected_findings = []
-                
-                for entity_type, type_findings in findings_by_type.items():
-                    for finding in type_findings[:max_per_type]:
-                        if len(selected_findings) >= max_total:
-                            break
-                        finding["id"] = str(uuid4())
-                        finding["file_id"] = file_id
-                        finding["file_name"] = file_info.get("name", "Unknown")
-                        finding["original"] = finding.get("text", "")
-                        finding["replacement"] = f"[{finding.get('entity_type', 'PII')}]"
-                        # Use context from column-based scan if available
-                        if "context" not in finding:
-                            finding["context"] = ""
-                        selected_findings.append(finding)
-                
-                self._scan_findings.extend(selected_findings)
-                findings_count = len(selected_findings)
-                
-                print(f"DEBUG: Selected {findings_count} findings from {len(findings)} total")
-                for t, f in findings_by_type.items():
-                    print(f"  {t}: {len(f)} found, {min(len(f), max_per_type)} selected")
-            else:
-                print(f"DEBUG: File not found or empty path: {file_path}")
-            
-            # Update status to completed
-            if scan_progress:
-                scan_progress.update_file_status(file_id, "completed", findings_count)
-                
-        except Exception as e:
-            print(f"Error scanning {file_path}: {e}")
-            import traceback
-            traceback.print_exc()
-            if scan_progress:
-                scan_progress.update_file_status(file_id, "error")
-        
-        # Move to next file
-        self._scan_index += 1
-        
-        # Process events to update UI
-        QApplication.processEvents()
-        
-        # Continue scanning with small delay to allow UI updates
-        QTimer.singleShot(100, self._scan_next_file)
-    
-    def _scan_file(self, file_path: str, selected_columns: list | None = None) -> list[dict]:
-        """
-        Scan a single file for PII.
-        
-        Args:
-            file_path: Path to the file.
-            selected_columns: List of ColumnInfo for Excel files (column-based scan).
-        
-        Returns list of findings.
-        """
-        from pathlib import Path
-        from uuid import uuid4
-        from sandiraksa.detection.presidio_engine import RegexRecognizer
-        from sandiraksa.detection.engine import DetectionEngine
-        from sandiraksa.detection.context import DetectionContext, DetectionConfig
-        from sandiraksa.detection.recognizers import (
-            NIKRecognizer,
-            NPWPRecognizer,
-            KKRecognizer,
-            IndonesianPhoneRecognizer,
-        )
-        
-        findings = []
-        path = Path(file_path)
-        
-        try:
-            suffix = path.suffix.lower()
-            
-            # For Excel files with selected columns, use column-based scanning
-            if suffix in ('.xlsx', '.xls') and selected_columns:
-                return self._scan_xlsx_columns(path, selected_columns)
-            
-            # For other files, use full content scanning
-            content = ""
-            
-            if suffix == '.csv':
-                from sandiraksa.documents.csv_handler import CSVHandler
-                handler = CSVHandler()
-                content = handler.read_file(path)
-            elif suffix in ('.xlsx', '.xls'):
-                # Fallback: scan all content if no columns selected
-                content = self._read_xlsx_content(path)
-            elif suffix == '.docx':
-                content = self._read_docx_content(path)
-            else:
-                content = path.read_text(encoding='utf-8', errors='ignore')
-            
-            if not content or not content.strip():
-                print(f"DEBUG: No content extracted from {file_path}")
-                return []
-            
-            print(f"DEBUG: Extracted {len(content)} chars from {file_path}")
-            
-            # Create detection engine
-            engine = self._create_detection_engine()
-            
-            # Create context
-            config = DetectionConfig(
-                enabled_entity_types={
-                    "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-                    "IP_ADDRESS", "URL", "IBAN_CODE",
-                    "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE", "ID_BPJS",
-                    "PERSON", "DATE_OF_BIRTH",
-                },
-                min_confidence=0.5,
-            )
-            context = DetectionContext(
-                operation_id=str(uuid4()),
-                file_id=str(uuid4()),
-                project_id=self._current_project_id or str(uuid4()),
-                config=config,
-            )
-            
-            # Analyze text
-            results = engine.analyze_text(content, context)
-            
-            # Convert to finding dicts
-            for result in results:
-                findings.append({
-                    "entity_type": result.entity_type,
-                    "text": result.text,
-                    "start": result.start,
-                    "end": result.end,
-                    "score": result.score,
-                })
-            
-            print(f"DEBUG: _scan_file found {len(findings)} findings")
-                
-        except Exception as e:
-            print(f"Error reading/scanning {file_path}: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        return findings
-    
-    def _create_detection_engine(self):
-        """Create and initialize detection engine with all recognizers."""
-        from sandiraksa.detection.presidio_engine import RegexRecognizer
-        from sandiraksa.detection.engine import DetectionEngine
-        from sandiraksa.detection.recognizers import (
-            NIKRecognizer,
-            NPWPRecognizer,
-            KKRecognizer,
-            IndonesianPhoneRecognizer,
-        )
-        from sandiraksa.detection.recognizers.id_dob import DateOfBirthRecognizer
-        from sandiraksa.detection.recognizers.id_person import (
-            IndonesianPersonRecognizer,
-        )
-        from sandiraksa.detection.recognizers.id_bpjs_legacy import (
-            BPJSRecognizerLegacy,
-        )
 
-        engine = DetectionEngine()
-        engine.registry.register(RegexRecognizer())
-        engine.registry.register(NIKRecognizer())
-        engine.registry.register(NPWPRecognizer())
-        engine.registry.register(KKRecognizer())
-        engine.registry.register(IndonesianPhoneRecognizer())
-        engine.registry.register(BPJSRecognizerLegacy())
-        # Context-aware recognizers for names and birth dates
-        engine.registry.register(DateOfBirthRecognizer())
-        engine.registry.register(IndonesianPersonRecognizer())
-        engine.initialize()
-
-        return engine
-    
-    def _scan_xlsx_columns(self, path, selected_columns: list) -> list[dict]:
-        """
-        Scan only selected columns in Excel file.
-        
-        Returns findings with column context.
-        """
-        from uuid import uuid4
-        from sandiraksa.detection.context import DetectionContext, DetectionConfig
-        
-        findings = []
-        
-        try:
-            import openpyxl
-            
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            engine = self._create_detection_engine()
-            
-            # Group columns by sheet
-            columns_by_sheet = {}
-            for col in selected_columns:
-                if col.sheet_name not in columns_by_sheet:
-                    columns_by_sheet[col.sheet_name] = []
-                columns_by_sheet[col.sheet_name].append(col)
-            
-            print(f"DEBUG: Scanning {len(selected_columns)} columns across {len(columns_by_sheet)} sheets")
-            
-            # Scan each sheet
-            for sheet_name, cols in columns_by_sheet.items():
-                if sheet_name not in wb.sheetnames:
-                    continue
-                
-                sheet = wb[sheet_name]
-                col_indices = {c.column_index for c in cols}
-                col_headers = {c.column_index: c.header for c in cols}
-                col_types = {c.column_index: c.suggested_type for c in cols}
-                col_modes = {
-                    c.column_index: getattr(c, "protection_mode", "full_cell")
-                    for c in cols
-                }
-                
-                # Iterate rows (skip header)
-                for row_num, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-                    for col_idx in col_indices:
-                        if col_idx - 1 < len(row):
-                            cell_value = row[col_idx - 1]
-                            if cell_value is not None:
-                                value_str = str(cell_value)
-                                
-                                # Get column info
-                                header = col_headers.get(col_idx, "")
-                                suggested_type = col_types.get(col_idx)
-                                mode = col_modes.get(col_idx, "full_cell")
-
-                                # PII-only columns (free text / JSON) always run
-                                # per-substring detection, never whole-cell emit.
-                                if mode == "pii_only":
-                                    suggested_type = None
-
-                                # If column has suggested type (like PERSON for names), use it directly
-                                if suggested_type in ("PERSON", "ADDRESS", "MEDICAL_RECORD", "MEDICAL_INFO", "DATE_OF_BIRTH"):
-                                    # These types need to be marked as-is (no regex detection needed)
-                                    findings.append({
-                                        "entity_type": suggested_type,
-                                        "text": value_str,
-                                        "start": 0,
-                                        "end": len(value_str),
-                                        "score": 0.95,
-                                        "context": f"{sheet_name}!{header} (Row {row_num})",
-                                        "sheet": sheet_name,
-                                        "column": header,
-                                        "row": row_num,
-                                    })
-                                else:
-                                    # For other types, run detection. Narrative
-                                    # (PII-only) columns also scan names/DOB.
-                                    enabled = {
-                                        "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-                                        "IP_ADDRESS", "URL", "IBAN_CODE",
-                                        "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE", "ID_BPJS",
-                                    }
-                                    if mode == "pii_only":
-                                        enabled |= {"PERSON", "DATE_OF_BIRTH"}
-                                    config = DetectionConfig(
-                                        enabled_entity_types=enabled
-                                    )
-                                    context = DetectionContext(
-                                        operation_id=str(uuid4()),
-                                        file_id=str(uuid4()),
-                                        project_id=self._current_project_id or str(uuid4()),
-                                        config=config,
-                                    )
-                                    
-                                    results = list(engine.analyze_text(value_str, context))
-
-                                    # Chain global custom patterns (engine
-                                    # does not evaluate these).
-                                    try:
-                                        from sandiraksa.detection.custom_patterns import (
-                                            find_custom_matches,
-                                        )
-                                        for cm in find_custom_matches(value_str):
-                                            results.append(type("_M", (), {
-                                                "entity_type": cm.label,
-                                                "text": cm.value,
-                                                "start": cm.start,
-                                                "end": cm.end,
-                                                "score": 0.95,
-                                            })())
-                                    except Exception as _ce:
-                                        print(f"Custom pattern chain failed: {_ce}")
-
-                                    if results:
-                                        for result in results:
-                                            findings.append({
-                                                "entity_type": result.entity_type,
-                                                "text": result.text,
-                                                "start": result.start,
-                                                "end": result.end,
-                                                "score": result.score,
-                                                "context": f"{sheet_name}!{header} (Row {row_num})",
-                                                "sheet": sheet_name,
-                                                "column": header,
-                                                "row": row_num,
-                                            })
-                                    elif suggested_type:
-                                        # If suggested but no detection, still include as suggested type
-                                        findings.append({
-                                            "entity_type": suggested_type,
-                                            "text": value_str,
-                                            "start": 0,
-                                            "end": len(value_str),
-                                            "score": 0.8,
-                                            "context": f"{sheet_name}!{header} (Row {row_num})",
-                                            "sheet": sheet_name,
-                                            "column": header,
-                                            "row": row_num,
-                                        })
-            
-            wb.close()
-            print(f"DEBUG: Column-based scan found {len(findings)} findings")
-            
-        except Exception as e:
-            print(f"Error in column-based scan: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        return findings
-    
-    def _read_xlsx_content(self, path) -> str:
-        """Read content from XLSX file."""
-        try:
-            import openpyxl
-            
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            content_parts = []
-            
-            for sheet_name in wb.sheetnames:
-                sheet = wb[sheet_name]
-                for row in sheet.iter_rows(values_only=True):
-                    for cell in row:
-                        if cell is not None:
-                            content_parts.append(str(cell))
-            
-            wb.close()
-            return "\n".join(content_parts)
-            
-        except ImportError:
-            print("WARNING: openpyxl not installed, cannot read XLSX")
-            return ""
-        except Exception as e:
-            print(f"Error reading XLSX: {e}")
-            return ""
-    
-    def _read_docx_content(self, path) -> str:
-        """Read content from DOCX file.
-
-        For tables, prepend the column header to each cell value as
-        "Header: Value" so context-aware recognizers (names, birth dates)
-        can use the header as detection context.
-        """
-        try:
-            from docx import Document
-            
-            doc = Document(path)
-            content_parts = []
-            
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    content_parts.append(para.text)
-            
-            # Read tables with header context.
-            for table in doc.tables:
-                rows = list(table.rows)
-                if not rows:
-                    continue
-
-                # First row is treated as the header row
-                headers = [c.text.strip() for c in rows[0].cells]
-
-                for row in rows[1:]:
-                    for col_idx, cell in enumerate(row.cells):
-                        value = cell.text.strip()
-                        if not value:
-                            continue
-                        header = headers[col_idx] if col_idx < len(headers) else ""
-                        if header:
-                            # "Nama Mock: Aisyah Pratama" -> context for recognizers
-                            content_parts.append(f"{header}: {value}")
-                        else:
-                            content_parts.append(value)
-
-            return "\n".join(content_parts)
-            
-        except ImportError:
-            print("WARNING: python-docx not installed, cannot read DOCX")
-            return ""
-        except Exception as e:
-            print(f"Error reading DOCX: {e}")
-            return ""
-    
-    def _on_scan_finished(self) -> None:
-        """Handle scan completion."""
-        total_findings = len(self._scan_findings)
-        print(f"DEBUG: Scan finished. Total findings: {total_findings}")
-        
-        # Store findings for review screen
-        self._current_findings = self._scan_findings
-        
-        # Update findings review screen
-        findings_review = self._pages.get(Page.FINDINGS_REVIEW)
-        if findings_review and hasattr(findings_review, 'set_findings'):
-            print(f"DEBUG: Setting {total_findings} findings in review screen")
-            findings_review.set_findings(self._scan_findings)
-        
-        # Emit scan complete (this triggers navigation)
+    def _on_worker_file_finished(self, file_id: str, findings_count: int) -> None:
+        """A file finished scanning (GUI thread)."""
         scan_progress = self._pages.get(Page.SCAN_PROGRESS)
         if scan_progress:
-            print(f"DEBUG: Emitting scan_complete with {total_findings}")
+            scan_progress.update_file_status(file_id, "completed", findings_count)
+
+    def _on_worker_file_error(self, file_id: str) -> None:
+        """A file failed to scan (GUI thread)."""
+        scan_progress = self._pages.get(Page.SCAN_PROGRESS)
+        if scan_progress:
+            scan_progress.update_file_status(file_id, "error")
+
+    def _on_worker_all_finished(self, findings: list) -> None:
+        """All files scanned; collect results and clean up the thread."""
+        self._scan_findings = findings
+        self._current_findings = findings
+        total_findings = len(findings)
+
+        findings_review = self._pages.get(Page.FINDINGS_REVIEW)
+        if findings_review and hasattr(findings_review, "set_findings"):
+            findings_review.set_findings(findings)
+
+        # Tear down the worker thread cleanly before navigating.
+        self._teardown_scan_thread()
+
+        scan_progress = self._pages.get(Page.SCAN_PROGRESS)
+        if scan_progress:
             scan_progress.scan_complete.emit(total_findings)
+
+    def _teardown_scan_thread(self) -> None:
+        """Stop and dispose the scan thread/worker if present."""
+        thread = getattr(self, "_scan_thread", None)
+        worker = getattr(self, "_scan_worker", None)
+        if thread is not None:
+            thread.quit()
+            thread.wait()
+            thread.deleteLater()
+        if worker is not None:
+            worker.deleteLater()
+        self._scan_thread = None
+        self._scan_worker = None
 
     def _on_scan_complete(self, findings_count: int) -> None:
         """Handle scan completion."""
@@ -1089,6 +695,10 @@ class MainWindow(QMainWindow):
 
     def _on_scan_cancelled(self) -> None:
         """Handle scan cancellation."""
+        worker = getattr(self, "_scan_worker", None)
+        if worker is not None:
+            worker.cancel()
+        self._teardown_scan_thread()
         self.navigate_to(Page.PROJECT_VIEW)
 
     def _on_files_added(self, files: list) -> None:
@@ -1506,41 +1116,31 @@ class MainWindow(QMainWindow):
             return ""
     
     def _scan_single_file(self, file_id: str) -> None:
-        """Scan a single file by ID and show results."""
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import QThread, QTimer
-        from pathlib import Path
-        from uuid import uuid4
-        
-        # Find file info
+        """Scan a single file by ID using the background scan worker."""
+        # Guard against overlapping scans.
+        if getattr(self, "_scan_thread", None) is not None:
+            print("DEBUG: Scan already in progress, ignoring request")
+            return
+
         project_view = self._pages.get(Page.PROJECT_VIEW)
         if not project_view:
             return
-        
-        file_info = next((f for f in project_view._files if f["id"] == file_id), None)
+
+        file_info = next(
+            (f for f in project_view._files if f["id"] == file_id), None
+        )
         if not file_info:
             return
-        
-        file_path = file_info.get("path", "")
-        selected_columns = file_info.get("selected_columns")
-        
+
         self.set_status(f"Memindai {file_info.get('name', 'file')}...")
-        
-        # Navigate to scan progress
+
         scan_progress = self._pages.get(Page.SCAN_PROGRESS)
         if scan_progress:
             scan_progress.set_files([file_info])
-            scan_progress.update_file_status(file_id, "scanning")
         self.navigate_to(Page.SCAN_PROGRESS)
-        QApplication.processEvents()
-        
-        # Scan in chunks to prevent freezing
-        self._current_scan_file = file_info
-        self._current_scan_columns = selected_columns
+
         self._scan_findings = []
-        
-        # Start chunked scan
-        QTimer.singleShot(100, self._scan_file_chunked)
+        self._start_scan_worker([file_info])
 
     def _on_file_removed(self, file_id: str) -> None:
         """Handle file removed from project."""
