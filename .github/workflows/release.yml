@@ -1,193 +1,37 @@
-name: Build and Release
-
-on:
-  push:
-    tags:
-      - "v*"
-
-  # Bisa dipakai untuk memperbaiki release existing,
-  # misalnya v1.0.5 yang saat ini assets-nya kosong.
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Release tag to build/publish, e.g. v1.0.5"
-        required: true
-        type: string
-
-permissions:
-  contents: write
-
-concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-  cancel-in-progress: false
-
-jobs:
-  # ============================================================
-  # BUILD WINDOWS
-  # ============================================================
-  build-windows:
-    name: Build Windows EXE + Installer
-    runs-on: windows-latest
-
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      portable_filename: ${{ steps.version.outputs.portable_filename }}
-      setup_filename: ${{ steps.version.outputs.setup_filename }}
-
-    steps:
-      # ----------------------------------------------------------
-      # Checkout
-      #
-      # Tag push:
-      #   checkout tag yang memicu workflow.
-      #
-      # Manual dispatch:
-      #   checkout tag yang diberikan user, misalnya v1.0.5.
-      # ----------------------------------------------------------
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-          fetch-depth: 0
-
-      # ----------------------------------------------------------
-      # Resolve release version
-      # ----------------------------------------------------------
-      - name: Resolve release version
-        id: version
-        shell: powershell
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          if ($env:EVENT_NAME -eq "workflow_dispatch") {
-              $tag = $env:INPUT_RELEASE_TAG
-          }
-          else {
-              $tag = $env:REF_NAME
-          }
-
-          Write-Host "Release tag: $tag"
-
-          if ($tag -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
-              throw "Invalid release tag '$tag'. Expected format: vX.Y.Z (example: v1.0.5)"
-          }
-
-          $version = $Matches["version"]
-
-          $portableFilename = "SandiRaksa-$version-windows-x64.exe"
-          $setupFilename = "SandiRaksa-Setup-$version.exe"
-
-          # Step outputs
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "portable_filename=$portableFilename" >> $env:GITHUB_OUTPUT
-          "setup_filename=$setupFilename" >> $env:GITHUB_OUTPUT
-
-          # Environment variables for following steps
-          "APP_VERSION=$version" >> $env:GITHUB_ENV
-          "TAG_NAME=$tag" >> $env:GITHUB_ENV
-          "PORTABLE_FILENAME=$portableFilename" >> $env:GITHUB_ENV
-          "SETUP_FILENAME=$setupFilename" >> $env:GITHUB_ENV
-
-          Write-Host "Version            : $version"
-          Write-Host "Portable filename  : $portableFilename"
-          Write-Host "Installer filename : $setupFilename"
-
-      # ----------------------------------------------------------
-      # Python
-      # ----------------------------------------------------------
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      # ----------------------------------------------------------
-      # Dependencies
-      # ----------------------------------------------------------
-      - name: Install dependencies
+      - name: Build Windows installer
         shell: powershell
         run: |
-          python -m pip install --upgrade pip
+          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
 
-          pip install -e .
+          $appDir = (Resolve-Path "dist").Path
 
-          if (Test-Path "requirements-build.txt") {
-              Write-Host "Installing requirements-build.txt"
-              pip install -r requirements-build.txt
-          }
-          else {
-              Write-Host "requirements-build.txt not found - installing PyInstaller directly"
-              pip install pyinstaller
-          }
+          Write-Host 'Application directory:'
+          Write-Host $appDir
+          Write-Host 'Building Windows installer...'
+          Write-Host "Installer filename: $env:SETUP_FILENAME"
 
-          Write-Host "Installing spaCy English model"
-          python -m spacy download en_core_web_sm
+          & ISCC.exe "/DAppVersion=$env:APP_VERSION" "/DSignedAppDir=$appDir" "installer\SandiRaksa.iss"
 
-      # ----------------------------------------------------------
-      # Build portable EXE
-      # ----------------------------------------------------------
-      - name: Build SandiRaksa executable
-        shell: powershell
-        run: |
-          Write-Host "Building SandiRaksa with PyInstaller..."
-
-          pyinstaller --clean --noconfirm SandiRaksa.spec
-
-          $exe = "dist\SandiRaksa.exe"
-
-          if (-not (Test-Path $exe)) {
-              throw "Expected executable was not generated: $exe"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Inno Setup failed with exit code $LASTEXITCODE"
           }
 
-          $file = Get-Item $exe
+          $installer = "installer-output\$env:SETUP_FILENAME"
+
+          if (-not (Test-Path $installer)) {
+              throw "Expected installer was not generated: $installer"
+          }
+
+          $file = Get-Item $installer
 
           if ($file.Length -le 0) {
-              throw "Generated executable is empty: $exe"
+              throw "Generated installer is empty: $installer"
           }
 
           $sizeMB = [math]::Round($file.Length / 1MB, 2)
 
-          Write-Host "========================================"
-          Write-Host "Portable executable successfully built"
-          Write-Host "Path : $exe"
-          Write-Host "Size : $sizeMB MB"
-          Write-Host "========================================"
-
-      # ----------------------------------------------------------
-      # Install Inno Setup
-      # ----------------------------------------------------------
-      - name: Install Inno Setup
-        shell: powershell
-        run: |
-          choco install innosetup -y --no-progress
-
-          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-
-          if (-not $iscc) {
-              throw "ISCC.exe was not found after installing Inno Setup."
-          }
-
-          Write-Host "Inno Setup compiler:"
-          Write-Host $iscc.Source
-
-      # ----------------------------------------------------------
-      # Build Installer
-      # ----------------------------------------------------------
-      - name: Build Windows installer
-        shell: powershell
-        run: |
-          New-Item `
-              -ItemType Directory `
-              -Force `
-              -Path "installer-output" | Out-Null
-
-          $appDir = (Resolve-Path "dist").Path
-
-          Write-Host "Application directory:"
-          Write-Host $appDir
-
-          Write-Host "Building
+          Write-Host '========================================'
+          Write-Host 'Windows installer successfully built'
+          Write-Host "Path: $installer"
+          Write-Host "Size: $sizeMB MB"
+          Write-Host '========================================'
