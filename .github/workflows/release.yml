@@ -3,131 +3,191 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags like v0.2.0
-  workflow_dispatch:  # Allow manual trigger
+      - "v*"
+
+  # Bisa dipakai untuk memperbaiki release existing,
+  # misalnya v1.0.5 yang saat ini assets-nya kosong.
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to build/publish, e.g. v1.0.5"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  # ============================================================
+  # BUILD WINDOWS
+  # ============================================================
   build-windows:
-    name: Build Windows
+    name: Build Windows EXE + Installer
     runs-on: windows-latest
-    
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      portable_filename: ${{ steps.version.outputs.portable_filename }}
+      setup_filename: ${{ steps.version.outputs.setup_filename }}
+
     steps:
+      # ----------------------------------------------------------
+      # Checkout
+      #
+      # Tag push:
+      #   checkout tag yang memicu workflow.
+      #
+      # Manual dispatch:
+      #   checkout tag yang diberikan user, misalnya v1.0.5.
+      # ----------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
-      
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          fetch-depth: 0
+
+      # ----------------------------------------------------------
+      # Resolve release version
+      # ----------------------------------------------------------
+      - name: Resolve release version
+        id: version
+        shell: powershell
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:EVENT_NAME -eq "workflow_dispatch") {
+              $tag = $env:INPUT_RELEASE_TAG
+          }
+          else {
+              $tag = $env:REF_NAME
+          }
+
+          Write-Host "Release tag: $tag"
+
+          if ($tag -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
+              throw "Invalid release tag '$tag'. Expected format: vX.Y.Z (example: v1.0.5)"
+          }
+
+          $version = $Matches["version"]
+
+          $portableFilename = "SandiRaksa-$version-windows-x64.exe"
+          $setupFilename = "SandiRaksa-Setup-$version.exe"
+
+          # Step outputs
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "portable_filename=$portableFilename" >> $env:GITHUB_OUTPUT
+          "setup_filename=$setupFilename" >> $env:GITHUB_OUTPUT
+
+          # Environment variables for following steps
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "TAG_NAME=$tag" >> $env:GITHUB_ENV
+          "PORTABLE_FILENAME=$portableFilename" >> $env:GITHUB_ENV
+          "SETUP_FILENAME=$setupFilename" >> $env:GITHUB_ENV
+
+          Write-Host "Version            : $version"
+          Write-Host "Portable filename  : $portableFilename"
+          Write-Host "Installer filename : $setupFilename"
+
+      # ----------------------------------------------------------
+      # Python
+      # ----------------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-      
+          python-version: "3.11"
+          cache: "pip"
+
+      # ----------------------------------------------------------
+      # Dependencies
+      # ----------------------------------------------------------
       - name: Install dependencies
+        shell: powershell
         run: |
           python -m pip install --upgrade pip
+
           pip install -e .
-          pip install pyinstaller
+
+          if (Test-Path "requirements-build.txt") {
+              Write-Host "Installing requirements-build.txt"
+              pip install -r requirements-build.txt
+          }
+          else {
+              Write-Host "requirements-build.txt not found - installing PyInstaller directly"
+              pip install pyinstaller
+          }
+
+          Write-Host "Installing spaCy English model"
           python -m spacy download en_core_web_sm
 
-      - name: Build executable
+      # ----------------------------------------------------------
+      # Build portable EXE
+      # ----------------------------------------------------------
+      - name: Build SandiRaksa executable
+        shell: powershell
         run: |
-          pyinstaller SandiRaksa.spec --noconfirm
-      
-      - name: Get version
-        id: version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION="dev"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          Write-Host "Building SandiRaksa with PyInstaller..."
 
-      - name: Build Windows installer (unsigned)
+          pyinstaller --clean --noconfirm SandiRaksa.spec
+
+          $exe = "dist\SandiRaksa.exe"
+
+          if (-not (Test-Path $exe)) {
+              throw "Expected executable was not generated: $exe"
+          }
+
+          $file = Get-Item $exe
+
+          if ($file.Length -le 0) {
+              throw "Generated executable is empty: $exe"
+          }
+
+          $sizeMB = [math]::Round($file.Length / 1MB, 2)
+
+          Write-Host "========================================"
+          Write-Host "Portable executable successfully built"
+          Write-Host "Path : $exe"
+          Write-Host "Size : $sizeMB MB"
+          Write-Host "========================================"
+
+      # ----------------------------------------------------------
+      # Install Inno Setup
+      # ----------------------------------------------------------
+      - name: Install Inno Setup
         shell: powershell
         run: |
           choco install innosetup -y --no-progress
+
           $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          if (-not $iscc) { throw "ISCC.exe was not found after installing Inno Setup." }
-          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
+
+          if (-not $iscc) {
+              throw "ISCC.exe was not found after installing Inno Setup."
+          }
+
+          Write-Host "Inno Setup compiler:"
+          Write-Host $iscc.Source
+
+      # ----------------------------------------------------------
+      # Build Installer
+      # ----------------------------------------------------------
+      - name: Build Windows installer
+        shell: powershell
+        run: |
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path "installer-output" | Out-Null
+
           $appDir = (Resolve-Path "dist").Path
-          & ISCC.exe "/DAppVersion=${{ steps.version.outputs.version }}" "/DSignedAppDir=$appDir" "installer\SandiRaksa.iss"
-          $setup = "installer-output\SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe"
-          if (-not (Test-Path $setup)) { throw "Expected installer was not generated: $setup" }
-          Write-Host "Built installer: $setup"
 
-      - name: Rename executable
-        run: |
-          Move-Item dist/SandiRaksa.exe "dist/SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe"
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build
-          path: |
-            dist/SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe
-            installer-output/SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe
-          retention-days: 5
+          Write-Host "Application directory:"
+          Write-Host $appDir
 
-  create-release:
-    name: Create Release
-    needs: [build-windows]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      
-      - name: List artifacts
-        run: find artifacts -type f
-      
-      - name: Get version
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: SandiRaksa v${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
-          files: |
-            artifacts/windows-build/*
-          body: |
-            ## SandiRaksa v${{ steps.version.outputs.version }}
-            
-            ### Downloads
-            
-            | Platform | Type | File |
-            |----------|------|------|
-            | Windows x64 | Installer (recommended) | `SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe` |
-            | Windows x64 | Portable executable | `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe` |
-            
-            ### Installation
-            
-            **Windows (installer, recommended):**
-            1. Download `SandiRaksa-Setup-${{ steps.version.outputs.version }}.exe`
-            2. Run it. It installs to Program Files and creates Start Menu, desktop, and Quick Launch shortcuts.
-            3. If Windows Defender warns, click "More info" → "Run anyway" (the build is unsigned).
-            
-            **Windows (portable):**
-            1. Download `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe`
-            2. Run it directly (no installation, no shortcuts).
-            
-            ### What's New
-            
-            See [CHANGELOG.md](https://github.com/yuanyudistira/sandiraksa/blob/main/CHANGELOG.md) for details.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          Write-Host "Building
