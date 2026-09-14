@@ -5,6 +5,17 @@ All notable changes to SandiRaksa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-09-14
+
+### Added
+- **Clipboard Privacy Guard** - Opt-in, real-time protection for copied text. When enabled (Settings → Clipboard Protection), SandiRaksa scans clipboard content locally for PII and offers a one-click protected (redacted) version. Detection runs on a background thread and reuses the exact same engine, recognizers, custom patterns, and deny-list as file scanning, so any detection tweak applies to both. A system notification appears on detection; clicking it opens the protection panel. Clipboard text is never stored or logged. Off by default.
+
+### Changed
+- **Unified detection core** - File and clipboard scanning now share a single detection module (`sandiraksa.detection.shared_scan`), ensuring consistent results. Custom patterns now apply to all text scans (TXT/DOCX/full-content), not just Excel columns.
+
+### Fixed
+- **Add-file crash** - Adding a file that is open/locked in another app (e.g. Excel) no longer force-closes the app; it now shows a friendly warning.
+
 ## [1.0.5] - 2026-09-11
 
 ### Added

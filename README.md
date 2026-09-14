@@ -13,6 +13,7 @@ SandiRaksa adalah aplikasi desktop standalone yang melindungi informasi sensitif
 ## ✨ Fitur Utama
 
 - 🔒 **100% Lokal** — Semua pemrosesan dilakukan di komputer Anda
+- 📋 **Clipboard Privacy Guard** — Proteksi real-time (opsional) untuk teks yang Anda salin: SandiRaksa mendeteksi PII di clipboard secara lokal dan menawarkan versi terlindungi sekali klik. Aktifkan lewat Settings → Clipboard Protection. Nonaktif secara default; teks clipboard tidak pernah disimpan.
 - 🔄 **Perlindungan Reversibel** — Kembalikan data asli setelah menerima hasil dari AI
 - 🇮🇩 **Dukungan Indonesia** — Deteksi NIK, NPWP, No. KK, BPJS, dan data Indonesia lainnya
 - 📄 **Multi-Format** — Dukung CSV, Excel, Word, PowerPoint, TXT
@@ -54,8 +55,9 @@ SandiRaksa adalah aplikasi desktop standalone yang melindungi informasi sensitif
 
 ### Windows
 
-Download installer dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
-- `SandiRaksa-1.0.0-windows-x64.exe`
+Download dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
+- `SandiRaksa-Setup-1.0.6.exe` (installer — membuat shortcut Start Menu/desktop) **atau**
+- `SandiRaksa-1.0.6-windows-x64.exe` (portable, jalankan langsung)
 
 > ⚠️ **Windows SmartScreen:** Saat pertama kali run, Windows mungkin menampilkan warning "Windows protected your PC" karena aplikasi belum ditandatangani. Klik **"More info"** → **"Run anyway"** untuk melanjutkan.
 
