@@ -57,10 +57,13 @@ class ClipboardScannerWorker(QObject):
 
             self._engine = build_engine()
             self._context = build_context(self._project_id)
-            # Warm-up: a tiny scan so first real scan isn't penalized.
+            # Warm-up: a tiny scan so the first real scan isn't penalized. Use a
+            # SEPARATE throwaway context so we never mutate the real context's
+            # enabled entity set (a previous bug left it stuck on EMAIL only).
             try:
-                self._context.config.enabled_entity_types = {"EMAIL_ADDRESS"}
-                self._engine.analyze_text("warmup a@b.com", self._context)
+                warmup_ctx = build_context(self._project_id)
+                warmup_ctx.config.enabled_entity_types = {"EMAIL_ADDRESS"}
+                self._engine.analyze_text("warmup a@b.com", warmup_ctx)
             except Exception:  # pragma: no cover - warm-up is best-effort
                 pass
             self.stateChanged.emit(WorkerState.READY)

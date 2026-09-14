@@ -95,6 +95,22 @@ def run_pipeline(
     # patterns, and deny-list as file scanning so any tweak applies to both.
     matches = detect(engine, context, text)
 
+    # Privacy-safe diagnostic (metadata only, no raw values): helps confirm
+    # what the engine actually detected on the clipboard payload.
+    try:
+        import logging
+        from collections import Counter
+
+        _types = Counter(m.entity_type for m in matches)
+        logging.getLogger("sandiraksa.clipboard").info(
+            "clipboard detect: text_len=%d raw_matches=%d types=%s",
+            len(text),
+            len(matches),
+            dict(_types) if _types else "none",
+        )
+    except Exception:
+        pass
+
     # -- map to Findings (severity label is UI-only, not a detection gate) --
     findings: list[Finding] = [
         Finding(

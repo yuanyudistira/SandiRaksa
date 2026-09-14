@@ -68,6 +68,8 @@ class ClipboardGuardController(QObject):
     scanFailed = Signal(object)
     #: Clipboard payload too large for automatic scan (design 42).
     oversizeSkipped = Signal()
+    #: Internal: dispatch a scan request to the worker thread (queued).
+    _scanRequested = Signal(object)
 
     def __init__(
         self,
@@ -314,8 +316,8 @@ class ClipboardGuardController(QObject):
             text=snapshot.text,
             created_monotonic=snapshot.observed_at_monotonic,
         )
-        # Queued connection hands the request to the worker thread.
-        self._worker.scan(request)
+        # Emit (queued) so scan() executes on the worker thread.
+        self._scanRequested.emit(request)
 
     # -- worker signal handlers (GUI thread) -----------------------------
     def _on_result_ready(self, result: ClipboardProtectionResult) -> None:
@@ -362,6 +364,11 @@ class ClipboardGuardController(QObject):
         self._worker.resultReady.connect(self._on_result_ready)
         self._worker.scanFailed.connect(self._on_scan_failed)
         self._worker.scanSkippedOversize.connect(self._on_oversize)
+        # Dispatch scans via a queued signal so scan() runs ON the worker
+        # thread, not the GUI thread. A direct self._worker.scan(...) call would
+        # execute on the caller's (GUI) thread and touch the worker's engine
+        # from the wrong thread.
+        self._scanRequested.connect(self._worker.scan)
         self._thread.start()
 
     def _teardown_worker(self) -> None:
