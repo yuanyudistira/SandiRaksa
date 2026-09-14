@@ -37,7 +37,11 @@ class _FakeResult:
 
 class _FakeConfig:
     def __init__(self):
-        self.enabled_entity_types = set()
+        # Full-content set so the fake engine returns everything (matches the
+        # shared detection core which no longer stages by entity subset).
+        from sandiraksa.detection.shared_scan import FULL_CONTENT_ENTITIES
+
+        self.enabled_entity_types = set(FULL_CONTENT_ENTITIES)
         self.min_confidence = 0.5
 
 
@@ -167,11 +171,13 @@ class TestPipeline:
         assert "[EMAIL_REDACTED]" in result.safe_text
         assert result.risk_level == ClipboardRiskLevel.MEDIUM
 
-    def test_policy_filters_low_score(self):
-        # PERSON needs 0.85; a 0.80 detection is dropped.
+    def test_detection_matches_engine_output(self):
+        # Detection now mirrors file scanning: whatever the engine returns is
+        # kept (deny-list applied inside the engine), no per-entity gating.
         engine = _FakeEngine([_FakeResult("PERSON", 0, 4, "Budi", 0.80)])
         result = run_pipeline(_req("Budi"), engine, _FakeContext(), now=100.0)
-        assert result.findings == ()
+        assert len(result.findings) == 1
+        assert result.findings[0].entity_type == "PERSON"
 
     def test_ttl_set(self):
         result = run_pipeline(_req("x"), _FakeEngine([]), _FakeContext(), now=100.0)
@@ -184,15 +190,12 @@ class TestPipeline:
         with pytest.raises(OversizedError):
             run_pipeline(_req(big), _FakeEngine([]), _FakeContext(), now=100.0)
 
-    def test_over_soft_limit_runs_stage1_only(self):
-        # Between soft and hard: Stage 2 (PERSON) must NOT run.
+    def test_between_soft_and_hard_limit_still_scans(self):
+        # Payloads between soft and hard limits are still scanned (no crash);
+        # detection is the same shared path as file scanning.
         size = SOFT_LIMIT + 1000
         text = "a" * size
-        engine = _FakeEngine([
-            _FakeResult("EMAIL_ADDRESS", 0, 5, "x", 0.9),  # stage 1
-            _FakeResult("PERSON", 6, 10, "y", 0.95),        # stage 2
-        ])
+        engine = _FakeEngine([_FakeResult("EMAIL_ADDRESS", 0, 5, "x", 0.9)])
         result = run_pipeline(_req(text), engine, _FakeContext(), now=100.0)
         types = {f.entity_type for f in result.findings}
         assert "EMAIL_ADDRESS" in types
-        assert "PERSON" not in types

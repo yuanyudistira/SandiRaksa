@@ -25,19 +25,19 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Signal
 
+# Canonical detection core shared with the Clipboard Privacy Guard, so file and
+# clipboard scanning use the exact same engine, entities, custom patterns, and
+# deny-list. Any tweak here applies to both.
+from sandiraksa.detection import shared_scan
 
-# Entity types detected for structured/typed cells.
-_STRUCTURED_ENTITIES = {
-    "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-    "IP_ADDRESS", "URL", "IBAN_CODE",
-    "ID_NIK", "ID_NPWP", "ID_KK", "ID_PHONE", "ID_BPJS",
-}
+# Entity types detected for structured/typed cells (from the shared core).
+_STRUCTURED_ENTITIES = set(shared_scan.STRUCTURED_ENTITIES)
 
 # Free-text / narrative columns additionally look for names and birth dates.
-_PII_ONLY_ENTITIES = _STRUCTURED_ENTITIES | {"PERSON", "DATE_OF_BIRTH"}
+_PII_ONLY_ENTITIES = set(shared_scan.FULL_CONTENT_ENTITIES)
 
 # Full-content (non-column) scan entity set.
-_FULL_CONTENT_ENTITIES = _STRUCTURED_ENTITIES | {"PERSON", "DATE_OF_BIRTH"}
+_FULL_CONTENT_ENTITIES = set(shared_scan.FULL_CONTENT_ENTITIES)
 
 # Types marked as-is (no regex detection needed) when a column is typed.
 _DIRECT_TYPES = ("PERSON", "ADDRESS", "MEDICAL_RECORD", "MEDICAL_INFO", "DATE_OF_BIRTH")
@@ -139,54 +139,22 @@ class ScanWorker(QObject):
     # ------------------------------------------------------- engine / context
 
     def _ensure_engine(self) -> None:
-        """Build the detection engine and reusable contexts once."""
+        """Build the detection engine and reusable contexts once (shared core)."""
         if self._engine is not None:
             return
 
-        from sandiraksa.detection.presidio_engine import RegexRecognizer
-        from sandiraksa.detection.engine import DetectionEngine
-        from sandiraksa.detection.recognizers import (
-            NIKRecognizer,
-            NPWPRecognizer,
-            KKRecognizer,
-            IndonesianPhoneRecognizer,
+        # Single source of truth: same engine/recognizers as clipboard.
+        self._engine = shared_scan.build_engine()
+
+        self._ctx_structured = shared_scan.build_context(
+            project_id=self._project_id, entities=_STRUCTURED_ENTITIES
         )
-        from sandiraksa.detection.recognizers.id_dob import DateOfBirthRecognizer
-        from sandiraksa.detection.recognizers.id_person import (
-            IndonesianPersonRecognizer,
+        self._ctx_pii_only = shared_scan.build_context(
+            project_id=self._project_id, entities=_PII_ONLY_ENTITIES
         )
-        from sandiraksa.detection.recognizers.id_bpjs_legacy import (
-            BPJSRecognizerLegacy,
+        self._ctx_full = shared_scan.build_context(
+            project_id=self._project_id, entities=_FULL_CONTENT_ENTITIES
         )
-
-        engine = DetectionEngine()
-        engine.registry.register(RegexRecognizer())
-        engine.registry.register(NIKRecognizer())
-        engine.registry.register(NPWPRecognizer())
-        engine.registry.register(KKRecognizer())
-        engine.registry.register(IndonesianPhoneRecognizer())
-        engine.registry.register(BPJSRecognizerLegacy())
-        engine.registry.register(DateOfBirthRecognizer())
-        engine.registry.register(IndonesianPersonRecognizer())
-        engine.initialize()
-        self._engine = engine
-
-        from sandiraksa.detection.context import DetectionContext, DetectionConfig
-
-        def _ctx(entities: set[str], min_conf: float = 0.5) -> DetectionContext:
-            return DetectionContext(
-                operation_id=str(uuid4()),
-                file_id=str(uuid4()),
-                project_id=self._project_id,
-                config=DetectionConfig(
-                    enabled_entity_types=set(entities),
-                    min_confidence=min_conf,
-                ),
-            )
-
-        self._ctx_structured = _ctx(_STRUCTURED_ENTITIES)
-        self._ctx_pii_only = _ctx(_PII_ONLY_ENTITIES)
-        self._ctx_full = _ctx(_FULL_CONTENT_ENTITIES)
 
     # --------------------------------------------------------------- scanning
 
@@ -203,7 +171,8 @@ class ScanWorker(QObject):
         if not content or not content.strip():
             return []
 
-        results = self._engine.analyze_text(content, self._ctx_full)
+        # Shared detection: engine + custom patterns + deny-list, same as clipboard.
+        results = shared_scan.detect(self._engine, self._ctx_full, content)
         return [
             {
                 "entity_type": r.entity_type,
@@ -231,10 +200,6 @@ class ScanWorker(QObject):
 
         findings: list[dict] = []
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        try:
-            from sandiraksa.detection.custom_patterns import find_custom_matches
-        except Exception:  # pragma: no cover - optional feature
-            find_custom_matches = None
 
         try:
             columns_by_sheet: dict = {}
@@ -291,20 +256,11 @@ class ScanWorker(QObject):
                                 if mode == "pii_only"
                                 else self._ctx_structured
                             )
-                            results = list(
-                                self._engine.analyze_text(value_str, ctx)
+                            # Shared detection (engine + custom patterns +
+                            # deny-list), identical to clipboard + full-content.
+                            results = shared_scan.detect(
+                                self._engine, ctx, value_str
                             )
-                            if find_custom_matches is not None:
-                                try:
-                                    for cm in find_custom_matches(value_str):
-                                        results.append(
-                                            _Match(
-                                                cm.label, cm.value,
-                                                cm.start, cm.end, 0.95,
-                                            )
-                                        )
-                                except Exception as ce:
-                                    print(f"Custom pattern chain failed: {ce}")
 
                             if results:
                                 for r in results:
@@ -429,19 +385,6 @@ class ScanWorker(QObject):
                 selected.append(finding)
 
         return selected
-
-
-class _Match:
-    """Lightweight match record for chained custom-pattern results."""
-
-    __slots__ = ("entity_type", "text", "start", "end", "score")
-
-    def __init__(self, entity_type, text, start, end, score) -> None:
-        self.entity_type = entity_type
-        self.text = text
-        self.start = start
-        self.end = end
-        self.score = score
 
 
 __all__ = ["ScanWorker"]

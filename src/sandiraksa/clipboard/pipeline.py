@@ -27,19 +27,13 @@ import uuid
 
 from sandiraksa.clipboard.models import (
     ClipboardProtectionResult,
+    Finding,
     ScanRequest,
 )
 from sandiraksa.clipboard.normalize import normalize_findings
-from sandiraksa.clipboard.risk_policy import (
-    STAGE1_ENTITIES,
-    STAGE2_ENTITIES,
-    compute_risk_level,
-    min_confidence_floor,
-    passes_policy,
-    severity_for,
-)
+from sandiraksa.clipboard.risk_policy import compute_risk_level, severity_for
 from sandiraksa.clipboard.treatment import protect_text
-from sandiraksa.clipboard.models import Finding
+from sandiraksa.detection.shared_scan import detect
 
 # Size limits in bytes of UTF-8 (design 42). Provisional; must be benchmarked.
 SOFT_LIMIT = 100 * 1024   # 100 KiB - full automatic scan
@@ -55,13 +49,6 @@ class OversizedError(Exception):
 
 def _byte_len(text: str) -> int:
     return len(text.encode("utf-8", errors="surrogatepass"))
-
-
-def _run_stage(engine, text: str, context, entities: list[str]) -> list:
-    """Run the engine restricted to a subset of entity types (design 40)."""
-    # DetectionEngine.analyze_text reads context.config.enabled_entity_types.
-    context.config.enabled_entity_types = set(entities)
-    return list(engine.analyze_text(text, context))
 
 
 def run_pipeline(
@@ -103,37 +90,23 @@ def run_pipeline(
         # >512 KiB: no automatic scan; caller offers manual scan.
         raise OversizedError(f"payload {size} bytes exceeds hard limit")
 
-    run_stage2 = True
-    if size > SOFT_LIMIT:
-        # 100-512 KiB: fast/deterministic (Stage 1) scan only (design 42).
-        run_stage2 = False
+    # -- detection (SHARED with file scanning) ---------------------------
+    # Uses the exact same engine, entity set, confidence floor, custom
+    # patterns, and deny-list as file scanning so any tweak applies to both.
+    matches = detect(engine, context, text)
 
-    # Lower the engine's floor to the policy minimum; per-entity policy does
-    # the real gating in passes_policy (design 46).
-    context.config.min_confidence = min_confidence_floor()
-
-    # -- Stage 1: deterministic recognizers (design 40) ------------------
-    raw = _run_stage(engine, text, context, STAGE1_ENTITIES)
-
-    # -- Stage 2: contextual / NER recognizers (design 40) ---------------
-    if run_stage2:
-        raw += _run_stage(engine, text, context, STAGE2_ENTITIES)
-
-    # -- map to policy-filtered Findings ---------------------------------
-    findings: list[Finding] = []
-    for r in raw:
-        if not passes_policy(r.entity_type, r.score):
-            continue
-        findings.append(
-            Finding(
-                entity_type=r.entity_type,
-                start=r.start,
-                end=r.end,
-                score=r.score,
-                severity=severity_for(r.entity_type),
-                text=r.text,
-            )
+    # -- map to Findings (severity label is UI-only, not a detection gate) --
+    findings: list[Finding] = [
+        Finding(
+            entity_type=m.entity_type,
+            start=m.start,
+            end=m.end,
+            score=m.score,
+            severity=severity_for(m.entity_type),
+            text=m.text,
         )
+        for m in matches
+    ]
 
     # -- normalization (design 44, 45) -----------------------------------
     findings = normalize_findings(findings)

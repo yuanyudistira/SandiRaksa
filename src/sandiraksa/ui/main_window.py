@@ -87,6 +87,8 @@ class MainWindow(QMainWindow):
         # Clipboard Privacy Guard (opt-in; created lazily on enable).
         self._clipboard_guard = None
         self._clipboard_consent_given = False
+        self._clipboard_tray = None
+        self._pending_clipboard_result = None
 
         self._setup_window()
         self._create_menus()
@@ -1692,7 +1694,67 @@ class MainWindow(QMainWindow):
         self.set_status(tr("clipboard.feature_name"))
 
     def _on_clipboard_result(self, result) -> None:
-        """Show the protection panel for a detected clipboard result (design 54)."""
+        """
+        Notify the user of a detected clipboard result.
+
+        Per design 53, a system notification is shown first (with type/count
+        metadata only, never raw values). Clicking it opens the in-app
+        protection panel (design 54). If the system tray is unavailable, the
+        panel is shown directly (design 55).
+        """
+        from sandiraksa.app.i18n import tr
+        from sandiraksa.clipboard.ui import notification_summary
+
+        self._pending_clipboard_result = result
+
+        tray = self._ensure_clipboard_tray()
+        if tray is not None:
+            summary = notification_summary(result)
+            tray.showMessage(
+                tr("clipboard.notify_title"),
+                tr("clipboard.notify_body", summary=summary),
+            )
+        else:
+            # No system tray: fall back to opening the panel directly (design 55).
+            self._open_clipboard_panel(result)
+
+    def _ensure_clipboard_tray(self):
+        """Create (once) the system tray icon used for clipboard notifications."""
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return None
+        tray = getattr(self, "_clipboard_tray", None)
+        if tray is None:
+            from PySide6.QtGui import QIcon
+
+            from sandiraksa.resources import app_icon_path
+
+            tray = QSystemTrayIcon(self)
+            try:
+                icon_path = app_icon_path()
+                if icon_path.exists():
+                    tray.setIcon(QIcon(str(icon_path)))
+            except Exception:
+                pass
+            # Clicking the notification message opens the panel.
+            tray.messageClicked.connect(self._on_clipboard_notification_clicked)
+            # Clicking the tray icon itself also opens the pending panel.
+            tray.activated.connect(
+                lambda _reason: self._on_clipboard_notification_clicked()
+            )
+            tray.setVisible(True)
+            self._clipboard_tray = tray
+        return tray
+
+    def _on_clipboard_notification_clicked(self) -> None:
+        """Open the protection panel for the pending result (design 54)."""
+        result = getattr(self, "_pending_clipboard_result", None)
+        if result is not None:
+            self._open_clipboard_panel(result)
+
+    def _open_clipboard_panel(self, result) -> None:
+        """Show the in-app protection panel (protected preview only, design 54)."""
         from sandiraksa.clipboard.ui import ProtectionPanel
 
         panel = ProtectionPanel(result, parent=self)
