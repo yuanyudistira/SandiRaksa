@@ -794,11 +794,11 @@ class MainWindow(QMainWindow):
                 None
             )
             
-            # Process Qt events to allow GC to complete before file I/O
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # Pre-analyze file BEFORE creating dialog (avoids GC crash)
+            # Pre-analyze the file before creating the dialog. This is a
+            # synchronous, self-contained read; we deliberately do NOT call
+            # processEvents() around it (that re-entered the event loop while a
+            # native openpyxl read was in flight and, with GC enabled, could
+            # cause heap corruption - e.g. when the file is locked/open in Excel).
             from sandiraksa.ui.dialogs.column_selection import analyze_csv_file, analyze_excel_file
             try:
                 if path.suffix.lower() == '.csv':
@@ -808,10 +808,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error analyzing file {path}: {e}")
                 worksheets = []
-            
-            # Process events again before dialog
-            QApplication.processEvents()
-            
+
             # Show column selection dialog with pre-analyzed data
             dialog = ColumnSelectionDialog(path, parent=self, worksheets=worksheets)
             if dialog.exec():

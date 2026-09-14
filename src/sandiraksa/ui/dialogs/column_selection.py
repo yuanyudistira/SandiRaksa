@@ -408,14 +408,14 @@ def analyze_excel_file(file_path: Path) -> list[WorksheetInfo]:
     Returns:
         List of WorksheetInfo with column details.
     """
-    import gc
-    gc_was_enabled = gc.isenabled()
-    gc.disable()  # Disable GC during file I/O to prevent heap corruption with PySide6
-    
+    # Synchronous, self-contained read. GC is left in its normal (enabled)
+    # state; the previous gc.disable() dance was a workaround for the old
+    # GC-disabled startup and is unnecessary now that scanning runs off-thread
+    # and no processEvents() is interleaved with this native read.
     try:
         if openpyxl is None:
             raise ImportError("openpyxl not installed")
-        
+
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         worksheets = []
         
@@ -471,11 +471,10 @@ def analyze_excel_file(file_path: Path) -> list[WorksheetInfo]:
         return worksheets
         
     except Exception as e:
+        # Includes the file-locked/open-in-Excel case; surfaces as an empty
+        # analysis so the caller shows a friendly warning instead of crashing.
         print(f"Error analyzing Excel file: {e}")
         return []
-    finally:
-        if gc_was_enabled:
-            gc.enable()
 
 
 def analyze_csv_file(file_path: Path) -> list[WorksheetInfo]:
@@ -488,10 +487,8 @@ def analyze_csv_file(file_path: Path) -> list[WorksheetInfo]:
     Returns:
         List with single WorksheetInfo containing column details.
     """
-    import gc
-    gc_was_enabled = gc.isenabled()
-    gc.disable()  # Disable GC during file I/O to prevent heap corruption
-    
+    # Synchronous, self-contained read; GC left in its normal state (see the
+    # note in analyze_excel_file).
     try:
         # Detect delimiter and encoding
         delimiter = _detect_csv_delimiter(file_path)
@@ -543,9 +540,6 @@ def analyze_csv_file(file_path: Path) -> list[WorksheetInfo]:
     except Exception as e:
         print(f"Error analyzing CSV file: {e}")
         return []
-    finally:
-        if gc_was_enabled:
-            gc.enable()
 
 
 def _detect_csv_delimiter(path: Path) -> str:
