@@ -52,6 +52,9 @@ _OWN_WRITE_TTL = 2.0
 #: Coalescer poll cadence (ms). The timer is short; actual dispatch is gated by
 #: the coalescer's debounce + rate limit.
 _POLL_INTERVAL_MS = 100
+#: Hard logical result budget (design 37, 38). A result arriving later than
+#: this after its request was created is discarded as a late result.
+_HARD_RESULT_TTL = 5.0
 
 
 class ClipboardGuardController(QObject):
@@ -172,6 +175,70 @@ class ClipboardGuardController(QObject):
             self._set_state(ClipboardMonitorState.ACTIVE)
             self._timer.start()
 
+    # -- lifecycle events (design 62, 63) --------------------------------
+    def on_session_lock(self) -> None:
+        """
+        Session locked: pause scanning and invalidate pending result actions
+        (design 62). We keep watcher state but stop reading/scanning.
+        """
+        self._invalidate_pending()
+        if self._sm.state == ClipboardMonitorState.ACTIVE:
+            self._timer.stop()
+            self._coalescer.clear()
+            self._set_state(ClipboardMonitorState.PAUSED)
+
+    def on_session_unlock(self) -> None:
+        """Session unlocked: resume if we were auto-paused by the lock."""
+        self.resume()
+
+    def on_sleep(self) -> None:
+        """
+        System sleeping: stop polling, pause scheduling, invalidate outstanding
+        result generations (design 63).
+        """
+        self._timer.stop()
+        self._coalescer.clear()
+        self._invalidate_pending()
+        try:
+            self._backend.stop()
+        except Exception:
+            pass
+        if self._sm.state == ClipboardMonitorState.ACTIVE:
+            self._set_state(ClipboardMonitorState.PAUSED)
+
+    def on_resume_from_sleep(self) -> None:
+        """
+        System resumed: reinitialize backend, clear own-write state, and resume
+        if the feature is enabled (design 63).
+        """
+        # Clear stale self-write expectation so we don't wrongly suppress a
+        # genuine post-resume change.
+        self._pending_own_write = None
+        cap = self._backend.capability()
+        if cap == ClipboardCapability.UNAVAILABLE:
+            self._set_state(ClipboardMonitorState.UNSUPPORTED)
+            return
+        if cap == ClipboardCapability.USER_INITIATED_ONLY:
+            self._set_state(ClipboardMonitorState.USER_INITIATED_ONLY)
+            return
+        if self._sm.state == ClipboardMonitorState.PAUSED:
+            try:
+                self._backend.start(self._on_clipboard_changed)
+            except Exception:
+                self._set_state(ClipboardMonitorState.ERROR)
+                return
+            self._set_state(ClipboardMonitorState.ACTIVE)
+            self._timer.start()
+
+    def _invalidate_pending(self) -> None:
+        """
+        Invalidate outstanding results by advancing the generation so any
+        in-flight or displayed result is treated as stale (design 62, 63).
+        """
+        self._generation += 1
+        self._current_fingerprint = None
+        self._latest_result = None
+
     def scan_current_clipboard(self) -> None:
         """
         Manually scan the current clipboard (design 7.2).
@@ -254,11 +321,17 @@ class ClipboardGuardController(QObject):
     def _on_result_ready(self, result: ClipboardProtectionResult) -> None:
         # Stale-result rejection (design 51): generation + fingerprint must
         # still be current, else discard silently.
+        now = time.monotonic()
         if result.generation != self._generation:
             return
         if result.source_fingerprint != self._current_fingerprint:
             return
-        if result.is_expired(time.monotonic()):
+        if result.is_expired(now):
+            return
+        # Watchdog (design 37, 38): discard a result that arrived after the
+        # hard logical budget, even if not yet TTL-expired.
+        if (now - result.created_monotonic) > _HARD_RESULT_TTL:
+            logger.debug("discarding late clipboard result (watchdog)")
             return
 
         self._latest_result = result

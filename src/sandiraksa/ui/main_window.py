@@ -84,6 +84,9 @@ class MainWindow(QMainWindow):
         # Background scan worker + its thread (None when no scan is running).
         self._scan_thread = None
         self._scan_worker = None
+        # Clipboard Privacy Guard (opt-in; created lazily on enable).
+        self._clipboard_guard = None
+        self._clipboard_consent_given = False
 
         self._setup_window()
         self._create_menus()
@@ -157,6 +160,14 @@ class MainWindow(QMainWindow):
         self._deny_list_action = QAction("Daftar Pengecualian...", self)
         self._deny_list_action.triggered.connect(self._on_deny_list)
         settings_menu.addAction(self._deny_list_action)
+
+        # Clipboard Privacy Guard (opt-in, OFF by default).
+        settings_menu.addSeparator()
+        self._clipboard_action = QAction(tr("clipboard.feature_name"), self)
+        self._clipboard_action.setCheckable(True)
+        self._clipboard_action.setChecked(False)
+        self._clipboard_action.toggled.connect(self._on_toggle_clipboard_guard)
+        settings_menu.addAction(self._clipboard_action)
 
         # Help menu
         help_menu = menubar.addMenu(tr("menu.help"))
@@ -1634,6 +1645,72 @@ class MainWindow(QMainWindow):
                 reload_global_deny_list()
             except Exception as e:
                 print(f"Failed to reload deny-list: {e}")
+
+    def _on_toggle_clipboard_guard(self, enabled: bool) -> None:
+        """
+        Enable/disable the Clipboard Privacy Guard (opt-in, off by default).
+
+        On first enable, shows the consent dialog (design 56). The controller is
+        created lazily only when the user opts in, so the feature has zero cost
+        and zero clipboard access until explicitly enabled.
+        """
+        from sandiraksa.app.i18n import tr
+
+        if not enabled:
+            if getattr(self, "_clipboard_guard", None) is not None:
+                self._clipboard_guard.stop()
+            return
+
+        # First-run consent (design 56).
+        if not getattr(self, "_clipboard_consent_given", False):
+            from sandiraksa.clipboard.ui import ConsentDialog
+
+            dialog = ConsentDialog(parent=self)
+            if not dialog.exec():
+                # User declined; revert the toggle without side effects.
+                self._clipboard_action.setChecked(False)
+                return
+            self._clipboard_consent_given = True
+
+        if getattr(self, "_clipboard_guard", None) is None:
+            from sandiraksa.clipboard.controller import ClipboardGuardController
+
+            guard = ClipboardGuardController(project_id=self._current_project_id)
+            guard.resultReady.connect(self._on_clipboard_result)
+            self._clipboard_guard = guard
+
+        # If clipboard is unavailable in this environment, tell the user
+        # honestly instead of pretending protection is active (design 7.3).
+        from sandiraksa.clipboard.models import ClipboardCapability
+
+        if self._clipboard_guard.capability() == ClipboardCapability.UNAVAILABLE:
+            self.set_status(tr("clipboard.unavailable"))
+            self._clipboard_action.setChecked(False)
+            return
+
+        self._clipboard_guard.start()
+        self.set_status(tr("clipboard.feature_name"))
+
+    def _on_clipboard_result(self, result) -> None:
+        """Show the protection panel for a detected clipboard result (design 54)."""
+        from sandiraksa.clipboard.ui import ProtectionPanel
+
+        panel = ProtectionPanel(result, parent=self)
+        panel.copyRequested.connect(self._on_clipboard_copy_protected)
+        # Keep a reference to prevent premature GC.
+        self._clipboard_panel = panel
+        panel.exec()
+
+    def _on_clipboard_copy_protected(self, result) -> None:
+        """User chose to copy the protected version (design 52)."""
+        from sandiraksa.app.i18n import tr
+
+        guard = getattr(self, "_clipboard_guard", None)
+        if guard is None:
+            return
+        if not guard.copy_protected(result):
+            # Clipboard changed since the scan; ask the user to rescan (design 52).
+            self.set_status(tr("clipboard.changed_warning"))
 
     def set_status(self, message: str) -> None:
         """Update status bar message."""

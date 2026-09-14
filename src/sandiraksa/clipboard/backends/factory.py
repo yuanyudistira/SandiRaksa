@@ -52,13 +52,14 @@ def create_backend(platform: str | None = None) -> ClipboardBackend:
 
     if plat.startswith("linux"):
         if _is_wayland():
-            # Wayland background monitoring is capability-driven and handled by
-            # a dedicated backend in a later sprint. Degrade honestly for now.
-            logger.info(
-                "Wayland session detected; realtime clipboard backend not yet "
-                "available - degrading to unsupported."
+            # Wayland is capability-driven; the backend reports
+            # USER_INITIATED_ONLY until a guided test confirms background
+            # observation (design 15).
+            from sandiraksa.clipboard.backends.linux_wayland import (
+                LinuxWaylandClipboardBackend,
             )
-            return UnsupportedClipboardBackend()
+
+            return LinuxWaylandClipboardBackend()
 
         from sandiraksa.clipboard.backends.linux_x11_qt import (
             LinuxX11ClipboardBackend,
@@ -67,12 +68,13 @@ def create_backend(platform: str | None = None) -> ClipboardBackend:
         return LinuxX11ClipboardBackend()
 
     if plat == "darwin":
-        # macOS NSPasteboard backend arrives in a later sprint (design 13).
-        logger.info(
-            "macOS detected; native pasteboard backend not yet available - "
-            "degrading to unsupported."
+        # macOS NSPasteboard changeCount poller (design 13); degrades to
+        # USER_INITIATED_ONLY internally if PyObjC is unavailable.
+        from sandiraksa.clipboard.backends.macos_pasteboard import (
+            MacOSClipboardBackend,
         )
-        return UnsupportedClipboardBackend()
+
+        return MacOSClipboardBackend()
 
     logger.info("Unknown platform %r; clipboard unsupported.", plat)
     return UnsupportedClipboardBackend()

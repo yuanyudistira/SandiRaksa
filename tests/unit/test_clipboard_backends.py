@@ -73,15 +73,21 @@ class TestFactory:
         assert type(b).__name__ == "LinuxX11ClipboardBackend"
         assert b.capability() == ClipboardCapability.REALTIME_BACKGROUND
 
-    def test_linux_wayland_degrades(self, monkeypatch):
+    def test_linux_wayland_capability_driven(self, monkeypatch):
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         b = create_backend(platform="linux")
-        assert isinstance(b, UnsupportedClipboardBackend)
-        assert b.capability() == ClipboardCapability.UNAVAILABLE
+        assert type(b).__name__ == "LinuxWaylandClipboardBackend"
+        # Honest default until a guided test confirms background observation.
+        assert b.capability() == ClipboardCapability.USER_INITIATED_ONLY
 
-    def test_macos_degrades(self):
+    def test_macos_backend(self):
         b = create_backend(platform="darwin")
-        assert isinstance(b, UnsupportedClipboardBackend)
+        assert type(b).__name__ == "MacOSClipboardBackend"
+        # On non-mac CI PyObjC is absent -> USER_INITIATED_ONLY (honest).
+        assert b.capability() in (
+            ClipboardCapability.USER_INITIATED_ONLY,
+            ClipboardCapability.REALTIME_BACKGROUND,
+        )
 
     def test_unknown_platform(self):
         b = create_backend(platform="plan9")

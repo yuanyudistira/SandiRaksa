@@ -7,7 +7,7 @@ datas = [
     ('assets/branding', 'assets/branding'),
 ]
 binaries = []
-hiddenimports = ['PySide6.QtSvg', 'PySide6.QtXml', 'presidio_analyzer', 'presidio_anonymizer', 'spacy', 'openpyxl', 'docx', 'pptx', 'cryptography', 'keyring', 'charset_normalizer']
+hiddenimports = ['PySide6.QtSvg', 'PySide6.QtXml', 'PySide6.QtNetwork', 'presidio_analyzer', 'presidio_anonymizer', 'spacy', 'openpyxl', 'docx', 'pptx', 'cryptography', 'keyring', 'charset_normalizer', 'sandiraksa.clipboard', 'sandiraksa.clipboard.worker_process', 'sandiraksa.clipboard.controller', 'sandiraksa.clipboard.supervisor']
 tmp_ret = collect_all('presidio_analyzer')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('spacy')
