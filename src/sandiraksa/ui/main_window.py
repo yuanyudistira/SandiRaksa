@@ -84,6 +84,9 @@ class MainWindow(QMainWindow):
         # Background scan worker + its thread (None when no scan is running).
         self._scan_thread = None
         self._scan_worker = None
+        # Background protect worker + its thread (None when idle).
+        self._protect_thread = None
+        self._protect_worker = None
         # Clipboard Privacy Guard (opt-in; created lazily on enable).
         self._clipboard_guard = None
         self._clipboard_consent_given = False
@@ -789,20 +792,32 @@ class MainWindow(QMainWindow):
                 None
             )
             
-            # Pre-analyze the file before creating the dialog. This is a
-            # synchronous, self-contained read; we deliberately do NOT call
-            # processEvents() around it (that re-entered the event loop while a
-            # native openpyxl read was in flight and, with GC enabled, could
-            # cause heap corruption - e.g. when the file is locked/open in Excel).
+            # Pre-analyze the file before creating the dialog. Analyzing a
+            # workbook (loading it and reading headers/samples) is a heavy,
+            # blocking read, so it runs on a background thread while a modal
+            # busy dialog keeps the window responsive. We do NOT use
+            # processEvents(): only the busy dialog's own event loop runs on the
+            # GUI thread, and the native read happens on the worker thread.
             from sandiraksa.ui.dialogs.column_selection import analyze_csv_file, analyze_excel_file
-            try:
-                if path.suffix.lower() == '.csv':
-                    worksheets = analyze_csv_file(path)
-                else:
-                    worksheets = analyze_excel_file(path)
-            except Exception as e:
-                print(f"Error analyzing file {path}: {e}")
+            from sandiraksa.ui.busy_worker import run_with_busy_dialog
+
+            is_csv = path.suffix.lower() == '.csv'
+
+            def _analyze(p=path, csv=is_csv):
+                return analyze_csv_file(p) if csv else analyze_excel_file(p)
+
+            result = run_with_busy_dialog(
+                self,
+                _analyze,
+                message=f"Menganalisis {path.name}...",
+                title="Menganalisis file",
+            )
+            if isinstance(result, Exception) or result is None:
+                if isinstance(result, Exception):
+                    print(f"Error analyzing file {path}: {result}")
                 worksheets = []
+            else:
+                worksheets = result
 
             # Show column selection dialog with pre-analyzed data
             dialog = ColumnSelectionDialog(path, parent=self, worksheets=worksheets)
@@ -1355,7 +1370,7 @@ class MainWindow(QMainWindow):
     def _on_restore_file(self) -> None:
         """Handle restore file request - open file dialog and restore file."""
         from pathlib import Path
-        from PySide6.QtWidgets import QFileDialog, QMessageBox, QApplication
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
         
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1369,15 +1384,30 @@ class MainWindow(QMainWindow):
             return
         
         self.set_status(f"Memulihkan {Path(file_path).name}...")
-        QApplication.processEvents()
-        
+
         try:
-            # Determine file type and call appropriate restore method
+            # Restore is a heavy blocking operation (load workbook, walk every
+            # cell, save). Run it on a background thread with a modal busy dialog
+            # so the window stays responsive instead of freezing.
+            from sandiraksa.ui.busy_worker import run_with_busy_dialog
+
             file_ext = Path(file_path).suffix.lower()
-            if file_ext == '.csv':
-                result = self._restore_csv_file(file_path)
-            else:
-                result = self._restore_excel_file(file_path)
+
+            def _restore(fp=file_path, ext=file_ext):
+                if ext == '.csv':
+                    return self._restore_csv_file(fp)
+                return self._restore_excel_file(fp)
+
+            result = run_with_busy_dialog(
+                self,
+                _restore,
+                message=f"Memulihkan {Path(file_path).name}...",
+                title="Memulihkan file",
+            )
+            if isinstance(result, Exception):
+                raise result
+            if result is None:
+                result = {"success": False, "error": "Tidak ada hasil"}
             
             if result.get("success"):
                 output_path = result.get("output_path")
@@ -1768,8 +1798,7 @@ class MainWindow(QMainWindow):
     def _on_protect_file(self, file_id: str) -> None:
         """Handle protect file request."""
         from pathlib import Path
-        from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
-        from PySide6.QtCore import Qt, QTimer
+        from PySide6.QtWidgets import QMessageBox
         
         project_view = self._pages.get(Page.PROJECT_VIEW)
         if not project_view:
@@ -1818,54 +1847,101 @@ class MainWindow(QMainWindow):
                 self._on_protect_file(file_id)
             return
         
+        # Guard against overlapping protections (re-entrancy / double-click).
+        if getattr(self, "_protect_thread", None) is not None:
+            print("DEBUG: Protection already in progress, ignoring request")
+            return
+
         # Update status to processing
         project_view.update_file_status(file_id, "processing")
         self.set_status(f"Memproteksi {file_info.get('name', 'file')}...")
-        QApplication.processEvents()
-        
-        # Run protection in background
+
+        # Run protection on a background thread so the GUI never freezes.
         self._protect_file_async(file_id, file_info, project_view)
     
     def _protect_file_async(self, file_id: str, file_info: dict, project_view) -> None:
-        """Run file protection asynchronously."""
-        from pathlib import Path
-        from PySide6.QtWidgets import QApplication, QMessageBox
-        from PySide6.QtCore import QTimer
-        
+        """Run file protection on a background QThread.
+
+        The heavy work (load workbook, iterate cells, save) is dispatched to a
+        ProtectWorker so the GUI event loop is never blocked. The result is
+        delivered back on the GUI thread via a queued signal, where all widget
+        updates happen safely.
+        """
+        from PySide6.QtCore import QThread
+        from sandiraksa.ui.protect_worker import ProtectWorker
+
         file_path = file_info.get("path")
         file_format = file_info.get("format", "").lower()
         selected_columns = file_info.get("selected_columns")
         detected_entities = file_info.get("detected_entities")
-        
-        try:
+
+        # Build a thread-safe closure that performs the actual protection. These
+        # _protect_*_file methods return a plain result dict and do not touch any
+        # Qt widget, so they are safe to run off the GUI thread.
+        def protect_fn() -> dict:
             if file_format in ("xlsx", "xls"):
-                result = self._protect_excel_file(file_path, selected_columns)
-            elif file_format == "csv":
-                result = self._protect_csv_file(file_path, selected_columns)
-            elif file_format in ("txt", "log", "md", "json", "xml", "html"):
-                result = self._protect_txt_file(file_path, detected_entities)
-            elif file_format in ("docx", "doc"):
-                result = self._protect_docx_file(file_path, detected_entities)
-            elif file_format in ("pptx", "ppt"):
-                result = self._protect_pptx_file(file_path, detected_entities)
-            else:
-                # For other file types, use generic protection
-                result = self._protect_generic_file(file_path)
-            
+                return self._protect_excel_file(file_path, selected_columns)
+            if file_format == "csv":
+                return self._protect_csv_file(file_path, selected_columns)
+            if file_format in ("txt", "log", "md", "json", "xml", "html"):
+                return self._protect_txt_file(file_path, detected_entities)
+            if file_format in ("docx", "doc"):
+                return self._protect_docx_file(file_path, detected_entities)
+            if file_format in ("pptx", "ppt"):
+                return self._protect_pptx_file(file_path, detected_entities)
+            return self._protect_generic_file(file_path)
+
+        self._protect_thread = QThread(self)
+        self._protect_worker = ProtectWorker(protect_fn)
+        self._protect_worker.moveToThread(self._protect_thread)
+
+        # Remember which file/view this run belongs to for the result handler.
+        self._protect_file_id = file_id
+        self._protect_project_view = project_view
+
+        self._protect_thread.started.connect(self._protect_worker.run)
+        self._protect_worker.finished.connect(self._on_protect_finished)
+        self._protect_thread.start()
+
+    def _teardown_protect_thread(self) -> None:
+        """Stop and dispose the protection thread/worker if present."""
+        thread = getattr(self, "_protect_thread", None)
+        worker = getattr(self, "_protect_worker", None)
+        if thread is not None:
+            thread.quit()
+            thread.wait()
+            thread.deleteLater()
+        if worker is not None:
+            worker.deleteLater()
+        self._protect_thread = None
+        self._protect_worker = None
+
+    def _on_protect_finished(self, result: dict) -> None:
+        """Handle protection result on the GUI thread."""
+        from pathlib import Path
+        from PySide6.QtWidgets import QMessageBox
+
+        file_id = getattr(self, "_protect_file_id", None)
+        project_view = getattr(self, "_protect_project_view", None)
+
+        # Tear down the worker thread before touching the UI/navigating.
+        self._teardown_protect_thread()
+
+        if not file_id or project_view is None:
+            return
+
+        try:
             if result.get("success"):
                 output_path = result.get("output_path")
                 cells_protected = result.get("cells_protected", 0)
-                
-                # Update file status in UI
+
                 project_view.update_file_status(
-                    file_id, 
+                    file_id,
                     "protected",
                     output_path=output_path,
                 )
-                
-                # Update file status in database
                 self._update_file_status_in_db(file_id, "protected")
-                
+
                 self.set_status(
                     f"Berhasil memproteksi {cells_protected} sel. "
                     f"File tersimpan: {Path(output_path).name}"
@@ -1880,7 +1956,6 @@ class MainWindow(QMainWindow):
                     "Error Proteksi",
                     f"Gagal memproteksi file:\n{error_msg}",
                 )
-                
         except Exception as e:
             import traceback
             traceback.print_exc()

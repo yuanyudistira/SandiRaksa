@@ -5,6 +5,25 @@ All notable changes to SandiRaksa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-09-17
+
+### Fixed
+- **Intermittent hang / force-close (windowed build)** - In the `--noconsole`
+  packaged app, `sys.stdout`/`sys.stderr` were replaced with an `io.StringIO()`
+  buffer. Because the app emits `print()` diagnostics from both the GUI thread
+  and the background scan worker, concurrent writes to the non-thread-safe,
+  ever-growing buffer could corrupt its state and intermittently freeze or
+  force-close the app (e.g. when loading a TXT file or protecting an Excel
+  file). The streams now use a stateless, thread-safe null sink, removing both
+  the race condition and the unbounded memory growth.
+
+### Changed
+- **File protection runs off the GUI thread** - Protecting a file (Excel, CSV,
+  TXT, Word, PowerPoint) now runs on a dedicated background worker thread,
+  mirroring the scan pipeline. The window no longer goes "Not Responding" while
+  a large workbook is loaded, tokenized, and saved. Removed the blocking
+  `processEvents()` call from the protect path and added re-entrancy guards.
+
 ## [1.0.6] - 2026-09-14
 
 ### Added

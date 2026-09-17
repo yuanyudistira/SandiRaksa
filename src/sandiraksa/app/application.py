@@ -15,12 +15,36 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-# Fix for PyInstaller --noconsole mode: sys.stdout/stderr may be None
-# This must be done BEFORE importing any module that uses logging or faulthandler
+# Fix for PyInstaller --noconsole mode: sys.stdout/stderr may be None.
+#
+# This MUST run before importing any module that uses logging or faulthandler.
+#
+# We deliberately do NOT use io.StringIO() here. In a --noconsole build the
+# whole app writes to these streams via scattered print("DEBUG: ...") calls,
+# including from the background ScanWorker (a QThread) AND the GUI thread at the
+# same time. io.StringIO() is (a) unbounded, so captured output grows forever
+# (a slow memory leak), and (b) NOT thread-safe, so concurrent writes from the
+# worker and GUI threads can corrupt its internal state and intermittently hang
+# or crash the frozen app. A stateless sink that discards everything avoids
+# both problems: nothing accumulates and there is no shared mutable state to
+# corrupt across threads.
+class _NullWriter:
+    """Thread-safe no-op stream: discards all writes, keeps no state."""
+
+    def write(self, _data):  # noqa: D401 - file-like API
+        return 0
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+
 if sys.stdout is None:
-    sys.stdout = io.StringIO()
+    sys.stdout = _NullWriter()
 if sys.stderr is None:
-    sys.stderr = io.StringIO()
+    sys.stderr = _NullWriter()
 
 import faulthandler
 
