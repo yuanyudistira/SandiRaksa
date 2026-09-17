@@ -61,12 +61,7 @@ Download dari [Release Page](https://github.com/yuanyudistira/SandiRaksa/release
 
 > ⚠️ **Windows SmartScreen:** Saat pertama kali run, Windows mungkin menampilkan warning "Windows protected your PC" karena aplikasi belum ditandatangani. Klik **"More info"** → **"Run anyway"** untuk melanjutkan.
 
-### macOS
-
-Download DMG dari [Release Page](https://github.com/yuanyudistira/SandiRaksa/releases):
-- `SandiRaksa-1.0.0-macos-x64.dmg`
-
-> ⚠️ **macOS Gatekeeper:** macOS mungkin memblokir aplikasi karena belum ditandatangani. Buka **System Preferences → Security & Privacy**, lalu klik **"Open Anyway"**.
+> ℹ️ Saat ini hanya tersedia build untuk **Windows**. Dukungan platform lain dapat menyusul di kemudian hari.
 
 ## 🧪 File Contoh untuk Testing
 
