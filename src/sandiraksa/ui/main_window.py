@@ -125,31 +125,6 @@ class MainWindow(QMainWindow):
         self._create_central_widget()
         self._create_status_bar()
         self._connect_language_changes()
-        self._setup_gc_timer()
-
-    def _setup_gc_timer(self) -> None:
-        """Reclaim reference cycles on a timer instead of automatically.
-
-        Automatic cyclic GC is disabled process-wide (see app.application)
-        because it could run mid-event-loop and free Qt objects still in
-        use, causing 0xC0000374 heap corruption. We still break reference
-        cycles (dialogs, models, closures), so we collect deliberately: a
-        low-frequency QTimer fires during idle time, when no handler is on
-        the stack, which is a safe point to collect.
-        """
-        import gc
-        from PySide6.QtCore import QTimer
-
-        self._gc_timer = QTimer(self)
-        self._gc_timer.setInterval(5000)  # every 5s during idle
-        self._gc_timer.timeout.connect(self._on_gc_tick)
-        self._gc_timer.start()
-
-    def _on_gc_tick(self) -> None:
-        """Collect cyclic garbage at a safe idle point."""
-        import gc
-
-        gc.collect()
 
     def _setup_window(self) -> None:
         """Configure window properties."""
@@ -843,31 +818,21 @@ class MainWindow(QMainWindow):
             )
             
             # Pre-analyze the file before creating the dialog. Analyzing a
-            # workbook (loading it and reading headers/samples) is a heavy,
-            # blocking read, so it runs on a background thread while a modal
-            # busy dialog keeps the window responsive. We do NOT use
-            # processEvents(): only the busy dialog's own event loop runs on the
-            # GUI thread, and the native read happens on the worker thread.
+            # workbook only reads headers + a 20-row sample and uses the
+            # sheet's stored max_row (not a full scan), so it is fast (~0.2s
+            # even for a 3000-row, multi-sheet file) and safe to run inline.
+            # It is deliberately synchronous: we do NOT wrap it in a background
+            # thread / busy dialog (that indirection previously deadlocked when
+            # the fast analysis finished before the modal loop started) and we
+            # do NOT call processEvents() around the native read.
             from sandiraksa.ui.dialogs.column_selection import analyze_csv_file, analyze_excel_file
-            from sandiraksa.ui.busy_worker import run_with_busy_dialog
 
             is_csv = path.suffix.lower() == '.csv'
-
-            def _analyze(p=path, csv=is_csv):
-                return analyze_csv_file(p) if csv else analyze_excel_file(p)
-
-            result = run_with_busy_dialog(
-                self,
-                _analyze,
-                message=f"Menganalisis {path.name}...",
-                title="Menganalisis file",
-            )
-            if isinstance(result, Exception) or result is None:
-                if isinstance(result, Exception):
-                    print(f"Error analyzing file {path}: {result}")
+            try:
+                worksheets = analyze_csv_file(path) if is_csv else analyze_excel_file(path)
+            except Exception as e:
+                print(f"Error analyzing file {path}: {e}")
                 worksheets = []
-            else:
-                worksheets = result
 
             # Show column selection dialog with pre-analyzed data
             dialog = ColumnSelectionDialog(path, parent=self, worksheets=worksheets)
@@ -1424,28 +1389,16 @@ class MainWindow(QMainWindow):
         self.set_status(f"Memulihkan {Path(file_path).name}...")
 
         try:
-            # Restore is a heavy blocking operation (load workbook, walk every
-            # cell, save). Run it on a background thread with a modal busy dialog
-            # so the window stays responsive instead of freezing.
-            from sandiraksa.ui.busy_worker import run_with_busy_dialog
-
+            # Restore synchronously. (An earlier attempt to run this on a
+            # background thread via a busy dialog was reverted because that
+            # helper could deadlock; a dedicated worker can be reintroduced
+            # later with the ProtectWorker pattern if large-file restores feel
+            # slow.)
             file_ext = Path(file_path).suffix.lower()
-
-            def _restore(fp=file_path, ext=file_ext):
-                if ext == '.csv':
-                    return self._restore_csv_file(fp)
-                return self._restore_excel_file(fp)
-
-            result = run_with_busy_dialog(
-                self,
-                _restore,
-                message=f"Memulihkan {Path(file_path).name}...",
-                title="Memulihkan file",
-            )
-            if isinstance(result, Exception):
-                raise result
-            if result is None:
-                result = {"success": False, "error": "Tidak ada hasil"}
+            if file_ext == '.csv':
+                result = self._restore_csv_file(file_path)
+            else:
+                result = self._restore_excel_file(file_path)
             
             if result.get("success"):
                 output_path = result.get("output_path")
@@ -1832,40 +1785,19 @@ class MainWindow(QMainWindow):
             status_bar.showMessage(message)
 
     def _exec_modal_dialog(self, dialog) -> int:
-        """Run a modal dialog with a safe lifecycle to avoid GC heap corruption.
+        """Run a modal dialog and let Qt own its lifetime.
 
-        Root cause of prior 0xC0000374 crashes: with the garbage collector
-        enabled globally, Python could collect a dialog's object graph (dialog,
-        child widgets, checkbox lists, signal closures) at a non-deterministic
-        time - sometimes after Qt had already destroyed the underlying C++
-        objects - leading to a use-after-free during "Garbage-collecting".
-        Holding a long-lived ``self._..._dialog`` strong reference (the previous
-        approach) made this worse by outliving the C++ side.
-
-        This helper instead:
-          * disables the cyclic GC only for the brief window around ``exec()``
-            (mirroring the proven per-IO pattern in the protectors), so no
-            collection can run mid-teardown; and
-          * explicitly schedules the dialog for deletion via ``deleteLater()``
-            so Qt owns and frees it deterministically on the event loop.
-
-        The dialog is kept as a local reference by the caller only for the
-        duration of this call, never stored on ``self``.
+        Keep this intentionally minimal. Automatic cyclic GC is already
+        disabled process-wide (see app.application), which is what prevents the
+        0xC0000374 use-after-free during teardown. We must NOT call
+        ``setParent(None)`` + ``deleteLater()`` here: forcibly detaching a
+        parented modal QDialog right after ``exec()`` and scheduling deletion
+        itself triggered the same heap corruption (it broke a create-project
+        flow that was previously stable). The dialog is parented to the main
+        window, so Qt frees it with its parent; the caller only keeps a local
+        reference for the duration of this call.
         """
-        import gc
-
-        gc_was_enabled = gc.isenabled()
-        gc.disable()
-        try:
-            return dialog.exec()
-        finally:
-            try:
-                dialog.setParent(None)
-                dialog.deleteLater()
-            except Exception:
-                pass
-            if gc_was_enabled:
-                gc.enable()
+        return dialog.exec()
 
     def _on_protect_file(self, file_id: str) -> None:
         """Handle protect file request."""

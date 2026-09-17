@@ -74,13 +74,13 @@ if hasattr(sys.stderr, 'fileno'):
 # corruption. It surfaced at many points (opening a TXT file, closing a preview
 # dialog, creating a project) because it is timing-dependent, not per-handler.
 #
-# Toggling the collector on/off globally before only moved the crash around.
-# The stable fix: stop the collector from running spontaneously on the GUI
-# thread and reclaim cycles deliberately instead:
-#   * automatic collection is DISABLED here (no collection mid event loop);
-#   * MainWindow schedules gc.collect() on a QTimer during idle time, and the
-#     scan/protect workers already collect on their own threads, so cyclic
-#     garbage is still reclaimed and memory does not grow unbounded.
+# TEMPORARY MITIGATION (Path A): running the cyclic collector at all - whether
+# automatically or via an explicit gc.collect() - has been observed to trip the
+# 0xC0000374 heap corruption, which means some object graph holds a Python
+# wrapper over an already-freed Qt C++ object. Until that root cause (introduced
+# with the Clipboard Guard after v1.0.4) is fixed, we disable automatic
+# collection here AND avoid manual gc.collect() elsewhere. This trades a small
+# risk of cyclic-garbage retention for stability. See the scan/protect workers.
 gc.disable()
 
 

@@ -50,8 +50,9 @@ class ProtectWorker(QObject):
             traceback.print_exc()
             result = {"success": False, "error": str(exc)}
         finally:
-            # Reclaim the transient allocations from loading/saving the file.
-            gc.collect()
+            # gc.collect() disabled app-wide (mitigation for 0xC0000374, see
+            # app.application). Do not collect here.
+            pass
         self.finished.emit(result or {"success": False, "error": "No result"})
 
 

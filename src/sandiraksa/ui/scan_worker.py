@@ -126,8 +126,10 @@ class ScanWorker(QObject):
                     traceback.print_exc()
                     self.file_error.emit(file_id)
 
-                # Reclaim transient per-file allocations promptly.
-                gc.collect()
+                # NOTE: automatic + manual GC is disabled app-wide as a
+                # temporary mitigation for a 0xC0000374 heap-corruption bug
+                # (see app.application). Do not call gc.collect() here.
+                # gc.collect()
         except Exception as exc:  # pragma: no cover - defensive
             print(f"ScanWorker: fatal error: {exc}")
             import traceback
@@ -282,7 +284,7 @@ class ScanWorker(QObject):
 
                         cells_processed += 1
                         if cells_processed % _GC_EVERY_CELLS == 0:
-                            gc.collect()
+                            pass  # gc.collect() disabled (mitigation, see app.application)
         finally:
             wb.close()
 
