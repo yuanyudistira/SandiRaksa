@@ -568,8 +568,9 @@ def _detect_csv_delimiter(path: Path) -> str:
     except Exception:
         return ','
     finally:
-        if gc_was_enabled:
-            gc.enable()
+        # GC is kept disabled app-wide (see app.application); do NOT
+        # re-enable it here even if it was on when we entered.
+        pass
 
 
 def _detect_csv_encoding(path: Path) -> str:
@@ -591,8 +592,9 @@ def _detect_csv_encoding(path: Path) -> str:
         
         return 'utf-8'
     finally:
-        if gc_was_enabled:
-            gc.enable()
+        # GC is kept disabled app-wide (see app.application); do NOT
+        # re-enable it here even if it was on when we entered.
+        pass
 
 
 class ColumnCheckbox(QWidget):

@@ -197,8 +197,9 @@ class DocxProtector:
             logger.error(f"Error detecting entities in DOCX: {e}")
             return []
         finally:
-            if gc_was_enabled:
-                gc.enable()
+            # GC is kept disabled app-wide (see app.application); do NOT
+            # re-enable it here even if it was on when we entered.
+            pass
 
     def _detect_in_cell(self, text: str, header: str) -> list[DetectedEntity]:
         """
@@ -478,8 +479,9 @@ class DocxProtector:
                 error_message=str(e),
             )
         finally:
-            if gc_was_enabled:
-                gc.enable()
+            # GC is kept disabled app-wide (see app.application); do NOT
+            # re-enable it here even if it was on when we entered.
+            pass
     
     def _replace_in_paragraph(self, paragraph, value_to_token: dict[str, str]) -> int:
         """

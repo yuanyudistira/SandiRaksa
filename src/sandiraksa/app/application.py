@@ -177,13 +177,29 @@ class SandiRaksaApp:
             logger.warning(f"Could not show splash screen: {e}")
 
     def _initialize_services(self) -> None:
-        """Initialize core application services."""
-        # TODO: Initialize services in order:
-        # 1. Config/settings
-        # 2. Database
-        # 3. Key store
-        # 4. Localization
-        pass
+        """Initialize core application services on the main thread.
+
+        Critically, we pre-load the shared spaCy/Presidio analyzer HERE, on the
+        main thread, before any background worker can run. Loading the spaCy
+        model on a worker QThread during file protection crashed the app with
+        0xC0000374 (heap corruption in spaCy's from_disk). Loading it once on
+        the main thread means workers only ever reuse the ready analyzer.
+        """
+        try:
+            from sandiraksa.detection.presidio_engine import preload_shared_analyzer
+
+            preload_shared_analyzer()
+        except Exception as e:  # pragma: no cover - environment dependent
+            logger.warning(f"Presidio preload skipped: {e}")
+
+        # CRITICAL: spaCy/Presidio (and some other native libs) re-enable the
+        # cyclic garbage collector during their initialization. We rely on GC
+        # staying OFF (running it corrupts the heap - 0xC0000374 - while native
+        # extensions like spaCy/lxml/openpyxl are mid-operation). Force it back
+        # off after any such init so the mitigation actually holds.
+        if gc.isenabled():
+            gc.disable()
+            logger.info("Re-disabled GC after NLP init (kept off for stability)")
 
     def _create_main_window(self) -> None:
         """Create and configure the main window."""

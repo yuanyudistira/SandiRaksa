@@ -32,6 +32,62 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Shared spaCy/Presidio analyzer (loaded ONCE, on the main thread).
+#
+# The spaCy model (en_core_web_sm) and its native deps (thinc/blis/cython) are
+# NOT safe to *load* from a background QThread: doing so during file protection
+# crashed with 0xC0000374 (heap corruption while spaCy's from_disk ran on the
+# worker thread). We therefore build the AnalyzerEngine exactly once, cache it
+# module-wide, and pre-load it on the GUI/main thread at startup
+# (see app.application). Workers then reuse the already-initialized analyzer
+# for read-only inference, which avoids the mid-thread model load entirely.
+# ---------------------------------------------------------------------------
+import threading as _threading
+
+_shared_analyzer = None
+_shared_analyzer_lock = _threading.Lock()
+
+
+def get_shared_analyzer(language: str = "en", nlp_engine: str = "spacy"):
+    """Return a process-wide, lazily built Presidio AnalyzerEngine.
+
+    Thread-safe. The first call performs the heavy spaCy model load; callers
+    should trigger it on the main thread at startup so no worker thread ever
+    runs the model deserialization.
+    """
+    global _shared_analyzer
+    if _shared_analyzer is not None:
+        return _shared_analyzer
+    with _shared_analyzer_lock:
+        if _shared_analyzer is None:
+            from presidio_analyzer import AnalyzerEngine
+            from presidio_analyzer.nlp_engine import NlpEngineProvider
+
+            nlp_config = {
+                "nlp_engine_name": nlp_engine,
+                "models": [{"lang_code": language, "model_name": "en_core_web_sm"}],
+            }
+            provider = NlpEngineProvider(nlp_configuration=nlp_config)
+            _shared_analyzer = AnalyzerEngine(nlp_engine=provider.create_engine())
+            logger.info("Shared Presidio analyzer initialized (%s)", nlp_engine)
+    return _shared_analyzer
+
+
+def preload_shared_analyzer() -> bool:
+    """Eagerly build the shared analyzer (call on the main thread at startup).
+
+    Returns True on success, False if Presidio/spaCy is unavailable (in which
+    case NLP-based name detection is simply skipped later).
+    """
+    try:
+        get_shared_analyzer()
+        return True
+    except Exception as e:  # pragma: no cover - environment dependent
+        logger.warning("Could not preload Presidio analyzer: %s", e)
+        return False
+
 # Mapping from Presidio entity types to our entity types
 PRESIDIO_ENTITY_MAP: dict[str, str] = {
     "PERSON": "PERSON",
@@ -121,20 +177,12 @@ class PresidioRecognizer(BaseRecognizer):
             return
 
         try:
-            from presidio_analyzer import AnalyzerEngine
-            from presidio_analyzer.nlp_engine import NlpEngineProvider
-
-            # Configure NLP engine
-            nlp_config = {
-                "nlp_engine_name": self._nlp_engine,
-                "models": [{"lang_code": self._language, "model_name": "en_core_web_sm"}],
-            }
-
-            # Create analyzer with configuration
-            provider = NlpEngineProvider(nlp_configuration=nlp_config)
-            nlp_engine = provider.create_engine()
-
-            self._analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+            # Reuse the process-wide analyzer (loaded once on the main
+            # thread). This avoids loading the spaCy model on a worker thread,
+            # which caused 0xC0000374 heap corruption during file protection.
+            self._analyzer = get_shared_analyzer(
+                language=self._language, nlp_engine=self._nlp_engine
+            )
             self._initialized = True
 
             logger.info(
