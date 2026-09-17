@@ -6,7 +6,7 @@ Shows detected PII entities in Word/PowerPoint documents before protection.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog,
@@ -35,8 +35,7 @@ class DocumentPreviewDialog(QDialog):
     - Option to select which entities to protect
     """
     
-    protection_requested = Signal(list)  # List of selected entities
-    
+
     def __init__(
         self,
         filename: str,

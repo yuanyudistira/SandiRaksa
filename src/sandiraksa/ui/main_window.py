@@ -56,6 +56,33 @@ from sandiraksa.ui.dialogs.column_selection import (
 from sandiraksa.protection.docx_protector import DocxProtector as _DocxProtector
 from sandiraksa.protection.pptx_protector import PptxProtector as _PptxProtector
 
+# Pre-import detection recognizers and the detection engine chain.
+#
+# These were previously imported lazily inside TxtProtector._detect_context_aware,
+# which runs while the app is processing a TXT file from inside the Qt event
+# loop. Importing a module for the first time mid-event-loop (a native
+# find_and_load) intermittently corrupted the Windows heap (0xC0000374) and
+# crashed the app when opening a TXT file. Importing them once here at module
+# load time removes that mid-loop dynamic import.
+from sandiraksa.detection.recognizers.id_person import (
+    IndonesianPersonRecognizer as _IndonesianPersonRecognizer,
+)
+from sandiraksa.detection.recognizers.id_dob import (
+    DateOfBirthRecognizer as _DateOfBirthRecognizer,
+)
+from sandiraksa.detection.recognizers.id_bpjs_legacy import (
+    BPJSRecognizerLegacy as _BPJSRecognizerLegacy,
+)
+from sandiraksa.detection.recognizers.person_filter import (
+    is_false_positive_person as _is_false_positive_person,
+    trim_person_span as _trim_person_span,  # noqa: F401
+)
+from sandiraksa.detection.recognizers.context_classifier import (
+    classify_label as _classify_label,  # noqa: F401
+)
+from sandiraksa.detection import custom_patterns as _custom_patterns  # noqa: F401
+from sandiraksa.detection import deny_list as _deny_list  # noqa: F401
+
 if TYPE_CHECKING:
     pass
 
@@ -393,11 +420,9 @@ class MainWindow(QMainWindow):
         from sandiraksa.ui.dialogs import ProjectSettingsDialog
 
         try:
-            # Create new dialog each time - don't cleanup old one manually
-            # Qt will handle memory when parent window closes
             dialog = ProjectSettingsDialog(parent=self)
             
-            if dialog.exec():
+            if self._exec_modal_dialog(dialog):
                 settings = dialog.get_settings()
                 
                 # Save project to database with all settings
@@ -821,7 +846,7 @@ class MainWindow(QMainWindow):
 
             # Show column selection dialog with pre-analyzed data
             dialog = ColumnSelectionDialog(path, parent=self, worksheets=worksheets)
-            if dialog.exec():
+            if self._exec_modal_dialog(dialog):
                 selected_columns = dialog.get_selected_columns()
                 if selected_columns:
                     if existing:
@@ -888,9 +913,11 @@ class MainWindow(QMainWindow):
                 self.set_status(f"Tidak ditemukan data sensitif dalam {path.name}")
                 return
             
-            # Keep strong reference to prevent crash
+            # Local reference only; the safe-exec helper owns teardown. Storing
+            # it on self (the old "strong reference") outlived the C++ object
+            # and caused the GC use-after-free crash on close.
             print("DEBUG: Creating TxtPreviewDialog")
-            self._txt_preview_dialog = TxtPreviewDialog(
+            dialog = TxtPreviewDialog(
                 filename=path.name,
                 text_content=text_content,
                 detected_entities=detected_entities,
@@ -898,8 +925,9 @@ class MainWindow(QMainWindow):
             )
             
             print("DEBUG: Showing dialog")
-            if self._txt_preview_dialog.exec():
-                selected_entities = self._txt_preview_dialog.get_selected_entities()
+            accepted = self._exec_modal_dialog(dialog)
+            if accepted:
+                selected_entities = dialog.get_selected_entities()
                 print(f"DEBUG: Dialog accepted, {len(selected_entities)} entities selected")
                 
                 if existing:
@@ -925,14 +953,10 @@ class MainWindow(QMainWindow):
     def _show_document_preview(self, path, existing, project_view) -> None:
         """Show document preview dialog for DOCX/PPTX files."""
         from sandiraksa.ui.dialogs import DocumentPreviewDialog
-        from PySide6.QtWidgets import QApplication
         
         print(f"DEBUG _show_document_preview: {path}")
         
         try:
-            # Process Qt events before file I/O
-            QApplication.processEvents()
-            
             suffix = path.suffix.lower()
             
             # Detect entities based on file type
@@ -955,9 +979,6 @@ class MainWindow(QMainWindow):
             
             print(f"DEBUG: Detected {len(detected_entities)} entities in {file_type}")
             
-            # Process events again before dialog
-            QApplication.processEvents()
-            
             if not detected_entities:
                 # No entities found, add file directly
                 print("DEBUG: No entities found, adding file directly")
@@ -966,9 +987,9 @@ class MainWindow(QMainWindow):
                 self.set_status(f"Tidak ditemukan data sensitif dalam {path.name}")
                 return
             
-            # Keep strong reference to dialog to prevent crash
+            # Local reference only; the safe-exec helper owns teardown.
             print("DEBUG: Creating DocumentPreviewDialog")
-            self._document_preview_dialog = DocumentPreviewDialog(
+            dialog = DocumentPreviewDialog(
                 filename=path.name,
                 file_type=file_type,
                 detected_entities=detected_entities,
@@ -976,8 +997,9 @@ class MainWindow(QMainWindow):
             )
             
             print("DEBUG: Showing dialog")
-            if self._document_preview_dialog.exec():
-                selected_entities = self._document_preview_dialog.get_selected_entities()
+            accepted = self._exec_modal_dialog(dialog)
+            if accepted:
+                selected_entities = dialog.get_selected_entities()
                 print(f"DEBUG: Dialog accepted, {len(selected_entities)} entities selected")
                 
                 if existing:
@@ -1242,19 +1264,10 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error loading project settings: {e}")
         
-        # Cleanup any previous dialog to prevent memory issues
-        if hasattr(self, '_settings_dialog') and self._settings_dialog is not None:
-            try:
-                self._settings_dialog.setParent(None)
-                self._settings_dialog.deleteLater()
-            except Exception:
-                pass
-            self._settings_dialog = None
-        
-        # Keep strong reference to dialog to prevent crash
-        self._settings_dialog = ProjectSettingsDialog(project_settings=existing_settings, parent=self)
-        if self._settings_dialog.exec():
-            new_settings = self._settings_dialog.get_settings()
+        # Create dialog as a local; _exec_modal_dialog handles lifecycle.
+        dialog = ProjectSettingsDialog(project_settings=existing_settings, parent=self)
+        if self._exec_modal_dialog(dialog):
+            new_settings = dialog.get_settings()
             self._save_project_settings(new_settings)
 
     def _save_project_settings(self, settings: dict) -> None:
@@ -1633,9 +1646,8 @@ class MainWindow(QMainWindow):
         """Show the global custom patterns editor dialog."""
         from sandiraksa.ui.dialogs import CustomPatternsDialog
 
-        # Keep a strong reference to prevent premature GC crash
-        self._custom_patterns_dialog = CustomPatternsDialog(parent=self)
-        if self._custom_patterns_dialog.exec():
+        dialog = CustomPatternsDialog(parent=self)
+        if self._exec_modal_dialog(dialog):
             # Refresh cached patterns so subsequent scans use the new set
             try:
                 from sandiraksa.detection.custom_patterns import (
@@ -1650,9 +1662,8 @@ class MainWindow(QMainWindow):
         """Show the global deny-list (exclusion terms) editor dialog."""
         from sandiraksa.ui.dialogs import DenyListDialog
 
-        # Keep a strong reference to prevent premature GC crash
-        self._deny_list_dialog = DenyListDialog(parent=self)
-        if self._deny_list_dialog.exec():
+        dialog = DenyListDialog(parent=self)
+        if self._exec_modal_dialog(dialog):
             # Refresh cached deny-list so subsequent scans use the new set
             try:
                 from sandiraksa.detection.deny_list import (
@@ -1794,6 +1805,42 @@ class MainWindow(QMainWindow):
         status_bar = self.statusBar()
         if status_bar:
             status_bar.showMessage(message)
+
+    def _exec_modal_dialog(self, dialog) -> int:
+        """Run a modal dialog with a safe lifecycle to avoid GC heap corruption.
+
+        Root cause of prior 0xC0000374 crashes: with the garbage collector
+        enabled globally, Python could collect a dialog's object graph (dialog,
+        child widgets, checkbox lists, signal closures) at a non-deterministic
+        time - sometimes after Qt had already destroyed the underlying C++
+        objects - leading to a use-after-free during "Garbage-collecting".
+        Holding a long-lived ``self._..._dialog`` strong reference (the previous
+        approach) made this worse by outliving the C++ side.
+
+        This helper instead:
+          * disables the cyclic GC only for the brief window around ``exec()``
+            (mirroring the proven per-IO pattern in the protectors), so no
+            collection can run mid-teardown; and
+          * explicitly schedules the dialog for deletion via ``deleteLater()``
+            so Qt owns and frees it deterministically on the event loop.
+
+        The dialog is kept as a local reference by the caller only for the
+        duration of this call, never stored on ``self``.
+        """
+        import gc
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            return dialog.exec()
+        finally:
+            try:
+                dialog.setParent(None)
+                dialog.deleteLater()
+            except Exception:
+                pass
+            if gc_was_enabled:
+                gc.enable()
 
     def _on_protect_file(self, file_id: str) -> None:
         """Handle protect file request."""
