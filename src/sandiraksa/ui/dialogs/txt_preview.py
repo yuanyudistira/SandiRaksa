@@ -6,7 +6,7 @@ Shows detected PII entities in a text file before protection.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QTextCharFormat, QFont
 from PySide6.QtWidgets import (
     QDialog,
@@ -37,8 +37,7 @@ class TxtPreviewDialog(QDialog):
     - Option to select which entities to protect
     """
     
-    protection_requested = Signal(list)  # List of entity indices to protect
-    
+
     def __init__(
         self,
         filename: str,
@@ -268,7 +267,6 @@ class TxtPreviewDialog(QDialog):
         ]
         
         if selected_indices:
-            self.protection_requested.emit(selected_indices)
             self.accept()
     
     def get_selected_entities(self) -> list:

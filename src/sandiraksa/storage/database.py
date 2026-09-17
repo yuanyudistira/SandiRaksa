@@ -77,6 +77,15 @@ class Database:
                 str(self._db_path),
                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
                 isolation_level=None,  # Autocommit mode, we manage transactions
+                # File protection now runs on a background worker thread (see
+                # ui.protect_worker), which reuses this shared connection. The
+                # default check_same_thread=True raises "SQLite objects created
+                # in a thread can only be used in that same thread" when the
+                # worker touches the token-mapping repo. WAL mode (enabled in
+                # _configure_connection) supports concurrent access, and the GUI
+                # thread waits for the worker's result rather than issuing DB
+                # writes in parallel, so sharing the connection is safe here.
+                check_same_thread=False,
             )
             self._connection.row_factory = sqlite3.Row
             self._configure_connection(self._connection)

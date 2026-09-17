@@ -434,8 +434,11 @@ def analyze_excel_file(file_path: Path) -> list[WorksheetInfo]:
             for i, row in enumerate(sheet.iter_rows(min_row=2, max_row=21, values_only=True)):
                 sample_rows.append(row)
             
-            # Count total rows
-            row_count = sum(1 for _ in sheet.iter_rows(values_only=True))
+            # Total rows: use the sheet's known dimension instead of iterating
+            # the entire workbook (iterating every row just to count them made
+            # adding a large file slow/blocking). max_row is available from the
+            # worksheet dimensions; fall back to 0 if openpyxl can't provide it.
+            row_count = sheet.max_row or 0
             
             # Build column info
             columns = []
@@ -565,8 +568,9 @@ def _detect_csv_delimiter(path: Path) -> str:
     except Exception:
         return ','
     finally:
-        if gc_was_enabled:
-            gc.enable()
+        # GC is kept disabled app-wide (see app.application); do NOT
+        # re-enable it here even if it was on when we entered.
+        pass
 
 
 def _detect_csv_encoding(path: Path) -> str:
@@ -588,8 +592,9 @@ def _detect_csv_encoding(path: Path) -> str:
         
         return 'utf-8'
     finally:
-        if gc_was_enabled:
-            gc.enable()
+        # GC is kept disabled app-wide (see app.application); do NOT
+        # re-enable it here even if it was on when we entered.
+        pass
 
 
 class ColumnCheckbox(QWidget):

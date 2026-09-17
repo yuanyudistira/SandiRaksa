@@ -200,8 +200,9 @@ class CSVProtector:
                 error_message=str(e),
             )
         finally:
-            if gc_was_enabled:
-                gc.enable()
+            # GC is kept disabled app-wide (see app.application); do NOT
+            # re-enable it here even if it was on when we entered.
+            pass
     
     def _detect_delimiter(self, path: Path) -> str:
         """Detect CSV delimiter by sampling first few lines."""

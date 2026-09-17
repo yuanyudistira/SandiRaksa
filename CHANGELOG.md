@@ -5,6 +5,46 @@ All notable changes to SandiRaksa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-09-17
+
+### Fixed
+- **Intermittent hang / force-close (windowed build)** - In the `--noconsole`
+  packaged app, `sys.stdout`/`sys.stderr` were replaced with an `io.StringIO()`
+  buffer. Because the app emits `print()` diagnostics from both the GUI thread
+  and the background scan worker, concurrent writes to the non-thread-safe,
+  ever-growing buffer could corrupt its state and intermittently freeze or
+  force-close the app (e.g. when loading a TXT file or protecting an Excel
+  file). The streams now use a stateless, thread-safe null sink, removing both
+  the race condition and the unbounded memory growth.
+
+- **Recurring native crash (STATUS_HEAP_CORRUPTION, 0xC0000374)** - Adding,
+  protecting, restoring files, and creating a project could crash the app. Root
+  cause: spaCy/Presidio re-enables Python's cyclic garbage collector during
+  initialization, after which the collector could run in the middle of a native
+  C-extension operation (spaCy model load, or openpyxl/lxml XML parsing) and
+  corrupt the heap. The spaCy model was also being loaded on a background worker
+  thread, itself a trigger. Fixed by loading the NLP analyzer once on the main
+  thread (shared singleton) and keeping automatic GC disabled process-wide
+  (re-disabling it after NLP init and removing stray `gc.enable()` restores).
+- **Cross-thread SQLite error during protection** - Running protection on a
+  worker thread raised "SQLite objects created in a thread can only be used in
+  that same thread". The database connection now allows cross-thread use
+  (`check_same_thread=False`); WAL is enabled and the GUI waits for the worker.
+- **Add-file / preview deadlock** - Analyzing a workbook via a modal busy
+  dialog could hang forever when the fast analysis finished before the dialog's
+  event loop started. Analysis and restore now run inline (they are fast) and
+  the busy-dialog helper was removed.
+
+### Changed
+- **File protection runs off the GUI thread** - Protecting a file (Excel, CSV,
+  TXT, Word, PowerPoint) now runs on a dedicated background worker thread,
+  mirroring the scan pipeline. The window no longer goes "Not Responding" while
+  a large workbook is loaded, tokenized, and saved. Removed the blocking
+  `processEvents()` call from the protect path and added re-entrancy guards.
+- **NLP model preloaded at startup** - The spaCy/Presidio analyzer is now built
+  once on the main thread during startup, so the first detection is faster and
+  never triggers a model load on a worker thread.
+
 ## [1.0.6] - 2026-09-14
 
 ### Added

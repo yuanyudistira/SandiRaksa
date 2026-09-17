@@ -56,6 +56,33 @@ from sandiraksa.ui.dialogs.column_selection import (
 from sandiraksa.protection.docx_protector import DocxProtector as _DocxProtector
 from sandiraksa.protection.pptx_protector import PptxProtector as _PptxProtector
 
+# Pre-import detection recognizers and the detection engine chain.
+#
+# These were previously imported lazily inside TxtProtector._detect_context_aware,
+# which runs while the app is processing a TXT file from inside the Qt event
+# loop. Importing a module for the first time mid-event-loop (a native
+# find_and_load) intermittently corrupted the Windows heap (0xC0000374) and
+# crashed the app when opening a TXT file. Importing them once here at module
+# load time removes that mid-loop dynamic import.
+from sandiraksa.detection.recognizers.id_person import (
+    IndonesianPersonRecognizer as _IndonesianPersonRecognizer,
+)
+from sandiraksa.detection.recognizers.id_dob import (
+    DateOfBirthRecognizer as _DateOfBirthRecognizer,
+)
+from sandiraksa.detection.recognizers.id_bpjs_legacy import (
+    BPJSRecognizerLegacy as _BPJSRecognizerLegacy,
+)
+from sandiraksa.detection.recognizers.person_filter import (
+    is_false_positive_person as _is_false_positive_person,
+    trim_person_span as _trim_person_span,  # noqa: F401
+)
+from sandiraksa.detection.recognizers.context_classifier import (
+    classify_label as _classify_label,  # noqa: F401
+)
+from sandiraksa.detection import custom_patterns as _custom_patterns  # noqa: F401
+from sandiraksa.detection import deny_list as _deny_list  # noqa: F401
+
 if TYPE_CHECKING:
     pass
 
@@ -84,6 +111,9 @@ class MainWindow(QMainWindow):
         # Background scan worker + its thread (None when no scan is running).
         self._scan_thread = None
         self._scan_worker = None
+        # Background protect worker + its thread (None when idle).
+        self._protect_thread = None
+        self._protect_worker = None
         # Clipboard Privacy Guard (opt-in; created lazily on enable).
         self._clipboard_guard = None
         self._clipboard_consent_given = False
@@ -189,10 +219,6 @@ class MainWindow(QMainWindow):
         self._contact_action = QAction(tr("menu.contact"), self)
         self._contact_action.triggered.connect(self._show_contact)
         help_menu.addAction(self._contact_action)
-
-        self._donate_action = QAction(tr("menu.donate"), self)
-        self._donate_action.triggered.connect(self._show_donate)
-        help_menu.addAction(self._donate_action)
 
         help_menu.addSeparator()
 
@@ -303,7 +329,6 @@ class MainWindow(QMainWindow):
         self._help_action.setText(tr("menu.help_contents"))
         self._docs_action.setText(tr("menu.documentation"))
         self._contact_action.setText(tr("menu.contact"))
-        self._donate_action.setText(tr("menu.donate"))
         self._about_action.setText(tr("menu.about"))
 
     def _update_status_bar(self) -> None:
@@ -395,11 +420,9 @@ class MainWindow(QMainWindow):
         from sandiraksa.ui.dialogs import ProjectSettingsDialog
 
         try:
-            # Create new dialog each time - don't cleanup old one manually
-            # Qt will handle memory when parent window closes
             dialog = ProjectSettingsDialog(parent=self)
             
-            if dialog.exec():
+            if self._exec_modal_dialog(dialog):
                 settings = dialog.get_settings()
                 
                 # Save project to database with all settings
@@ -794,24 +817,26 @@ class MainWindow(QMainWindow):
                 None
             )
             
-            # Pre-analyze the file before creating the dialog. This is a
-            # synchronous, self-contained read; we deliberately do NOT call
-            # processEvents() around it (that re-entered the event loop while a
-            # native openpyxl read was in flight and, with GC enabled, could
-            # cause heap corruption - e.g. when the file is locked/open in Excel).
+            # Pre-analyze the file before creating the dialog. Analyzing a
+            # workbook only reads headers + a 20-row sample and uses the
+            # sheet's stored max_row (not a full scan), so it is fast (~0.2s
+            # even for a 3000-row, multi-sheet file) and safe to run inline.
+            # It is deliberately synchronous: we do NOT wrap it in a background
+            # thread / busy dialog (that indirection previously deadlocked when
+            # the fast analysis finished before the modal loop started) and we
+            # do NOT call processEvents() around the native read.
             from sandiraksa.ui.dialogs.column_selection import analyze_csv_file, analyze_excel_file
+
+            is_csv = path.suffix.lower() == '.csv'
             try:
-                if path.suffix.lower() == '.csv':
-                    worksheets = analyze_csv_file(path)
-                else:
-                    worksheets = analyze_excel_file(path)
+                worksheets = analyze_csv_file(path) if is_csv else analyze_excel_file(path)
             except Exception as e:
                 print(f"Error analyzing file {path}: {e}")
                 worksheets = []
 
             # Show column selection dialog with pre-analyzed data
             dialog = ColumnSelectionDialog(path, parent=self, worksheets=worksheets)
-            if dialog.exec():
+            if self._exec_modal_dialog(dialog):
                 selected_columns = dialog.get_selected_columns()
                 if selected_columns:
                     if existing:
@@ -878,9 +903,11 @@ class MainWindow(QMainWindow):
                 self.set_status(f"Tidak ditemukan data sensitif dalam {path.name}")
                 return
             
-            # Keep strong reference to prevent crash
+            # Local reference only; the safe-exec helper owns teardown. Storing
+            # it on self (the old "strong reference") outlived the C++ object
+            # and caused the GC use-after-free crash on close.
             print("DEBUG: Creating TxtPreviewDialog")
-            self._txt_preview_dialog = TxtPreviewDialog(
+            dialog = TxtPreviewDialog(
                 filename=path.name,
                 text_content=text_content,
                 detected_entities=detected_entities,
@@ -888,8 +915,9 @@ class MainWindow(QMainWindow):
             )
             
             print("DEBUG: Showing dialog")
-            if self._txt_preview_dialog.exec():
-                selected_entities = self._txt_preview_dialog.get_selected_entities()
+            accepted = self._exec_modal_dialog(dialog)
+            if accepted:
+                selected_entities = dialog.get_selected_entities()
                 print(f"DEBUG: Dialog accepted, {len(selected_entities)} entities selected")
                 
                 if existing:
@@ -915,14 +943,10 @@ class MainWindow(QMainWindow):
     def _show_document_preview(self, path, existing, project_view) -> None:
         """Show document preview dialog for DOCX/PPTX files."""
         from sandiraksa.ui.dialogs import DocumentPreviewDialog
-        from PySide6.QtWidgets import QApplication
         
         print(f"DEBUG _show_document_preview: {path}")
         
         try:
-            # Process Qt events before file I/O
-            QApplication.processEvents()
-            
             suffix = path.suffix.lower()
             
             # Detect entities based on file type
@@ -945,9 +969,6 @@ class MainWindow(QMainWindow):
             
             print(f"DEBUG: Detected {len(detected_entities)} entities in {file_type}")
             
-            # Process events again before dialog
-            QApplication.processEvents()
-            
             if not detected_entities:
                 # No entities found, add file directly
                 print("DEBUG: No entities found, adding file directly")
@@ -956,9 +977,9 @@ class MainWindow(QMainWindow):
                 self.set_status(f"Tidak ditemukan data sensitif dalam {path.name}")
                 return
             
-            # Keep strong reference to dialog to prevent crash
+            # Local reference only; the safe-exec helper owns teardown.
             print("DEBUG: Creating DocumentPreviewDialog")
-            self._document_preview_dialog = DocumentPreviewDialog(
+            dialog = DocumentPreviewDialog(
                 filename=path.name,
                 file_type=file_type,
                 detected_entities=detected_entities,
@@ -966,8 +987,9 @@ class MainWindow(QMainWindow):
             )
             
             print("DEBUG: Showing dialog")
-            if self._document_preview_dialog.exec():
-                selected_entities = self._document_preview_dialog.get_selected_entities()
+            accepted = self._exec_modal_dialog(dialog)
+            if accepted:
+                selected_entities = dialog.get_selected_entities()
                 print(f"DEBUG: Dialog accepted, {len(selected_entities)} entities selected")
                 
                 if existing:
@@ -1232,19 +1254,10 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error loading project settings: {e}")
         
-        # Cleanup any previous dialog to prevent memory issues
-        if hasattr(self, '_settings_dialog') and self._settings_dialog is not None:
-            try:
-                self._settings_dialog.setParent(None)
-                self._settings_dialog.deleteLater()
-            except Exception:
-                pass
-            self._settings_dialog = None
-        
-        # Keep strong reference to dialog to prevent crash
-        self._settings_dialog = ProjectSettingsDialog(project_settings=existing_settings, parent=self)
-        if self._settings_dialog.exec():
-            new_settings = self._settings_dialog.get_settings()
+        # Create dialog as a local; _exec_modal_dialog handles lifecycle.
+        dialog = ProjectSettingsDialog(project_settings=existing_settings, parent=self)
+        if self._exec_modal_dialog(dialog):
+            new_settings = dialog.get_settings()
             self._save_project_settings(new_settings)
 
     def _save_project_settings(self, settings: dict) -> None:
@@ -1360,7 +1373,7 @@ class MainWindow(QMainWindow):
     def _on_restore_file(self) -> None:
         """Handle restore file request - open file dialog and restore file."""
         from pathlib import Path
-        from PySide6.QtWidgets import QFileDialog, QMessageBox, QApplication
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
         
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1374,10 +1387,13 @@ class MainWindow(QMainWindow):
             return
         
         self.set_status(f"Memulihkan {Path(file_path).name}...")
-        QApplication.processEvents()
-        
+
         try:
-            # Determine file type and call appropriate restore method
+            # Restore synchronously. (An earlier attempt to run this on a
+            # background thread via a busy dialog was reverted because that
+            # helper could deadlock; a dedicated worker can be reintroduced
+            # later with the ProtectWorker pattern if large-file restores feel
+            # slow.)
             file_ext = Path(file_path).suffix.lower()
             if file_ext == '.csv':
                 result = self._restore_csv_file(file_path)
@@ -1604,20 +1620,12 @@ class MainWindow(QMainWindow):
         dialog = ContactDialog(parent=self)
         dialog.exec()
 
-    def _show_donate(self) -> None:
-        """Show donate dialog."""
-        from sandiraksa.ui.dialogs import DonateDialog
-
-        dialog = DonateDialog(parent=self)
-        dialog.exec()
-
     def _on_custom_patterns(self) -> None:
         """Show the global custom patterns editor dialog."""
         from sandiraksa.ui.dialogs import CustomPatternsDialog
 
-        # Keep a strong reference to prevent premature GC crash
-        self._custom_patterns_dialog = CustomPatternsDialog(parent=self)
-        if self._custom_patterns_dialog.exec():
+        dialog = CustomPatternsDialog(parent=self)
+        if self._exec_modal_dialog(dialog):
             # Refresh cached patterns so subsequent scans use the new set
             try:
                 from sandiraksa.detection.custom_patterns import (
@@ -1632,9 +1640,8 @@ class MainWindow(QMainWindow):
         """Show the global deny-list (exclusion terms) editor dialog."""
         from sandiraksa.ui.dialogs import DenyListDialog
 
-        # Keep a strong reference to prevent premature GC crash
-        self._deny_list_dialog = DenyListDialog(parent=self)
-        if self._deny_list_dialog.exec():
+        dialog = DenyListDialog(parent=self)
+        if self._exec_modal_dialog(dialog):
             # Refresh cached deny-list so subsequent scans use the new set
             try:
                 from sandiraksa.detection.deny_list import (
@@ -1777,11 +1784,25 @@ class MainWindow(QMainWindow):
         if status_bar:
             status_bar.showMessage(message)
 
+    def _exec_modal_dialog(self, dialog) -> int:
+        """Run a modal dialog and let Qt own its lifetime.
+
+        Keep this intentionally minimal. Automatic cyclic GC is already
+        disabled process-wide (see app.application), which is what prevents the
+        0xC0000374 use-after-free during teardown. We must NOT call
+        ``setParent(None)`` + ``deleteLater()`` here: forcibly detaching a
+        parented modal QDialog right after ``exec()`` and scheduling deletion
+        itself triggered the same heap corruption (it broke a create-project
+        flow that was previously stable). The dialog is parented to the main
+        window, so Qt frees it with its parent; the caller only keeps a local
+        reference for the duration of this call.
+        """
+        return dialog.exec()
+
     def _on_protect_file(self, file_id: str) -> None:
         """Handle protect file request."""
         from pathlib import Path
-        from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
-        from PySide6.QtCore import Qt, QTimer
+        from PySide6.QtWidgets import QMessageBox
         
         project_view = self._pages.get(Page.PROJECT_VIEW)
         if not project_view:
@@ -1830,54 +1851,101 @@ class MainWindow(QMainWindow):
                 self._on_protect_file(file_id)
             return
         
+        # Guard against overlapping protections (re-entrancy / double-click).
+        if getattr(self, "_protect_thread", None) is not None:
+            print("DEBUG: Protection already in progress, ignoring request")
+            return
+
         # Update status to processing
         project_view.update_file_status(file_id, "processing")
         self.set_status(f"Memproteksi {file_info.get('name', 'file')}...")
-        QApplication.processEvents()
-        
-        # Run protection in background
+
+        # Run protection on a background thread so the GUI never freezes.
         self._protect_file_async(file_id, file_info, project_view)
     
     def _protect_file_async(self, file_id: str, file_info: dict, project_view) -> None:
-        """Run file protection asynchronously."""
-        from pathlib import Path
-        from PySide6.QtWidgets import QApplication, QMessageBox
-        from PySide6.QtCore import QTimer
-        
+        """Run file protection on a background QThread.
+
+        The heavy work (load workbook, iterate cells, save) is dispatched to a
+        ProtectWorker so the GUI event loop is never blocked. The result is
+        delivered back on the GUI thread via a queued signal, where all widget
+        updates happen safely.
+        """
+        from PySide6.QtCore import QThread
+        from sandiraksa.ui.protect_worker import ProtectWorker
+
         file_path = file_info.get("path")
         file_format = file_info.get("format", "").lower()
         selected_columns = file_info.get("selected_columns")
         detected_entities = file_info.get("detected_entities")
-        
-        try:
+
+        # Build a thread-safe closure that performs the actual protection. These
+        # _protect_*_file methods return a plain result dict and do not touch any
+        # Qt widget, so they are safe to run off the GUI thread.
+        def protect_fn() -> dict:
             if file_format in ("xlsx", "xls"):
-                result = self._protect_excel_file(file_path, selected_columns)
-            elif file_format == "csv":
-                result = self._protect_csv_file(file_path, selected_columns)
-            elif file_format in ("txt", "log", "md", "json", "xml", "html"):
-                result = self._protect_txt_file(file_path, detected_entities)
-            elif file_format in ("docx", "doc"):
-                result = self._protect_docx_file(file_path, detected_entities)
-            elif file_format in ("pptx", "ppt"):
-                result = self._protect_pptx_file(file_path, detected_entities)
-            else:
-                # For other file types, use generic protection
-                result = self._protect_generic_file(file_path)
-            
+                return self._protect_excel_file(file_path, selected_columns)
+            if file_format == "csv":
+                return self._protect_csv_file(file_path, selected_columns)
+            if file_format in ("txt", "log", "md", "json", "xml", "html"):
+                return self._protect_txt_file(file_path, detected_entities)
+            if file_format in ("docx", "doc"):
+                return self._protect_docx_file(file_path, detected_entities)
+            if file_format in ("pptx", "ppt"):
+                return self._protect_pptx_file(file_path, detected_entities)
+            return self._protect_generic_file(file_path)
+
+        self._protect_thread = QThread(self)
+        self._protect_worker = ProtectWorker(protect_fn)
+        self._protect_worker.moveToThread(self._protect_thread)
+
+        # Remember which file/view this run belongs to for the result handler.
+        self._protect_file_id = file_id
+        self._protect_project_view = project_view
+
+        self._protect_thread.started.connect(self._protect_worker.run)
+        self._protect_worker.finished.connect(self._on_protect_finished)
+        self._protect_thread.start()
+
+    def _teardown_protect_thread(self) -> None:
+        """Stop and dispose the protection thread/worker if present."""
+        thread = getattr(self, "_protect_thread", None)
+        worker = getattr(self, "_protect_worker", None)
+        if thread is not None:
+            thread.quit()
+            thread.wait()
+            thread.deleteLater()
+        if worker is not None:
+            worker.deleteLater()
+        self._protect_thread = None
+        self._protect_worker = None
+
+    def _on_protect_finished(self, result: dict) -> None:
+        """Handle protection result on the GUI thread."""
+        from pathlib import Path
+        from PySide6.QtWidgets import QMessageBox
+
+        file_id = getattr(self, "_protect_file_id", None)
+        project_view = getattr(self, "_protect_project_view", None)
+
+        # Tear down the worker thread before touching the UI/navigating.
+        self._teardown_protect_thread()
+
+        if not file_id or project_view is None:
+            return
+
+        try:
             if result.get("success"):
                 output_path = result.get("output_path")
                 cells_protected = result.get("cells_protected", 0)
-                
-                # Update file status in UI
+
                 project_view.update_file_status(
-                    file_id, 
+                    file_id,
                     "protected",
                     output_path=output_path,
                 )
-                
-                # Update file status in database
                 self._update_file_status_in_db(file_id, "protected")
-                
+
                 self.set_status(
                     f"Berhasil memproteksi {cells_protected} sel. "
                     f"File tersimpan: {Path(output_path).name}"
@@ -1892,7 +1960,6 @@ class MainWindow(QMainWindow):
                     "Error Proteksi",
                     f"Gagal memproteksi file:\n{error_msg}",
                 )
-                
         except Exception as e:
             import traceback
             traceback.print_exc()

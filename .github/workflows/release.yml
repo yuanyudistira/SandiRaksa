@@ -1,298 +1,114 @@
-name: Build and Release
+name: Build (Unsigned, Manual)
 
+# Retired as the tag-driven release path. The signed release pipeline is
+# .github/workflows/release-windows.yml (triggered by v* tags).
+# This workflow is kept for manual, UNSIGNED debug builds only and no longer
+# runs on tags, so the two do not both fire on a v* tag.
 on:
-  push:
-    tags:
-      - "v*"
-
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Release tag, example: v1.0.5"
-        required: true
-        type: string
+  workflow_dispatch:  # Manual only — produces an unsigned .exe for debugging
 
 permissions:
   contents: write
 
 jobs:
-  build-release:
-    name: Build Windows EXE and Installer
+  build-windows:
+    name: Build Windows
     runs-on: windows-latest
-
+    
     steps:
-      # ==========================================================
-      # CHECKOUT
-      # ==========================================================
-      - name: Checkout release source
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-          fetch-depth: 0
-
-      # ==========================================================
-      # VERSION
-      # ==========================================================
-      - name: Resolve version
-        shell: powershell
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ inputs.release_tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          if ($env:EVENT_NAME -eq "workflow_dispatch") {
-              $tag = $env:INPUT_TAG
-          }
-          else {
-              $tag = $env:REF_NAME
-          }
-
-          if ($tag -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
-              throw "Invalid tag: $tag. Expected format vX.Y.Z"
-          }
-
-          $version = $Matches["version"]
-
-          "TAG_NAME=$tag" >> $env:GITHUB_ENV
-          "APP_VERSION=$version" >> $env:GITHUB_ENV
-          "PORTABLE_FILENAME=SandiRaksa-$version-windows-x64.exe" >> $env:GITHUB_ENV
-          "SETUP_FILENAME=SandiRaksa-Setup-$version.exe" >> $env:GITHUB_ENV
-
-          Write-Host "Tag: $tag"
-          Write-Host "Version: $version"
-
-      # ==========================================================
-      # PYTHON
-      # ==========================================================
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
-
-      # ==========================================================
-      # DEPENDENCIES
-      # ==========================================================
+          python-version: '3.11'
+          cache: 'pip'
+      
       - name: Install dependencies
-        shell: powershell
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-
-          if (Test-Path "requirements-build.txt") {
-              pip install -r requirements-build.txt
-          }
-          else {
-              pip install pyinstaller
-          }
-
+          pip install pyinstaller
           python -m spacy download en_core_web_sm
 
-      # ==========================================================
-      # BUILD EXE
-      # ==========================================================
-      - name: Build SandiRaksa executable
-        shell: powershell
+      - name: Build executable
         run: |
-          pyinstaller --clean --noconfirm SandiRaksa.spec
-
-          if (-not (Test-Path "dist\SandiRaksa.exe")) {
-              throw "dist\SandiRaksa.exe was not generated"
-          }
-
-          $exe = Get-Item "dist\SandiRaksa.exe"
-
-          if ($exe.Length -le 0) {
-              throw "Generated executable is empty"
-          }
-
-          $sizeMB = [math]::Round($exe.Length / 1MB, 2)
-
-          Write-Host "SandiRaksa.exe successfully built"
-          Write-Host "Size: $sizeMB MB"
-
-      # ==========================================================
-      # INNO SETUP
-      # ==========================================================
-      - name: Install Inno Setup
-        shell: powershell
+          pyinstaller SandiRaksa.spec --noconfirm
+      
+      - name: Get version
+        id: version
+        shell: bash
         run: |
-          choco install innosetup -y --no-progress
-
-          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-
-          if (-not $iscc) {
-              throw "ISCC.exe was not found"
-          }
-
-          Write-Host "Inno Setup found at:"
-          Write-Host $iscc.Source
-
-      # ==========================================================
-      # BUILD INSTALLER
-      # ==========================================================
-      - name: Build Windows installer
-        shell: powershell
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Rename executable
         run: |
-          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
-
-          $appDir = (Resolve-Path "dist").Path
-
-          Write-Host "Application directory:"
-          Write-Host $appDir
-          Write-Host "Building Windows installer..."
-          Write-Host "Installer: $env:SETUP_FILENAME"
-
-          & ISCC.exe "/DAppVersion=$env:APP_VERSION" "/DSignedAppDir=$appDir" "installer\SandiRaksa.iss"
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "Inno Setup failed with exit code $LASTEXITCODE"
-          }
-
-          $installer = "installer-output\$env:SETUP_FILENAME"
-
-          if (-not (Test-Path $installer)) {
-              throw "Installer was not generated: $installer"
-          }
-
-          $file = Get-Item $installer
-
-          if ($file.Length -le 0) {
-              throw "Generated installer is empty"
-          }
-
-          $sizeMB = [math]::Round($file.Length / 1MB, 2)
-
-          Write-Host "Installer successfully built"
-          Write-Host "Size: $sizeMB MB"
-
-      # ==========================================================
-      # PREPARE RELEASE
-      # ==========================================================
-      - name: Prepare release assets
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
-
-          Copy-Item "dist\SandiRaksa.exe" "release-assets\$env:PORTABLE_FILENAME" -Force
-
-          Copy-Item "installer-output\$env:SETUP_FILENAME" "release-assets\$env:SETUP_FILENAME" -Force
-
-          if (-not (Test-Path "release-assets\$env:PORTABLE_FILENAME")) {
-              throw "Portable executable missing from release-assets"
-          }
-
-          if (-not (Test-Path "release-assets\$env:SETUP_FILENAME")) {
-              throw "Installer missing from release-assets"
-          }
-
-          Write-Host "Release assets:"
-          Get-ChildItem release-assets | Format-Table Name, Length
-
-      # ==========================================================
-      # SHA256
-      # ==========================================================
-      - name: Generate SHA256 checksums
-        shell: powershell
-        run: |
-          $portable = "release-assets\$env:PORTABLE_FILENAME"
-          $installer = "release-assets\$env:SETUP_FILENAME"
-
-          $portableHash = (Get-FileHash $portable -Algorithm SHA256).Hash.ToLower()
-          $installerHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
-
-          @(
-              "$portableHash *$env:PORTABLE_FILENAME"
-              "$installerHash *$env:SETUP_FILENAME"
-          ) | Set-Content "release-assets\SHA256SUMS.txt" -Encoding ascii
-
-          Get-Content "release-assets\SHA256SUMS.txt"
-
-      # ==========================================================
-      # FINAL VALIDATION
-      # ==========================================================
-      - name: Validate release assets
-        shell: powershell
-        run: |
-          $required = @(
-              "release-assets\$env:PORTABLE_FILENAME",
-              "release-assets\$env:SETUP_FILENAME",
-              "release-assets\SHA256SUMS.txt"
-          )
-
-          foreach ($path in $required) {
-              if (-not (Test-Path $path)) {
-                  throw "Missing required release asset: $path"
-              }
-
-              $file = Get-Item $path
-
-              if ($file.Length -le 0) {
-                  throw "Release asset is empty: $path"
-              }
-
-              Write-Host "OK: $path"
-          }
-
-          Write-Host "All release assets validated successfully"
-
-      # ==========================================================
-      # ACTIONS ARTIFACT BACKUP
-      # ==========================================================
-      - name: Upload build artifact
+          Move-Item dist/SandiRaksa.exe "dist/SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe"
+      
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SandiRaksa-${{ env.APP_VERSION }}-windows
-          path: release-assets/*
-          if-no-files-found: error
-          retention-days: 14
+          name: windows-build
+          path: dist/*.exe
+          retention-days: 5
 
-      # ==========================================================
-      # CREATE OR UPDATE GITHUB RELEASE
-      # ==========================================================
-      - name: Publish GitHub Release
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
+  create-release:
+    name: Create Release
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: List artifacts
+        run: find artifacts -type f
+      
+      - name: Get version
+        id: version
         run: |
-          Write-Host "Publishing release $env:TAG_NAME"
-
-          gh release view "$env:TAG_NAME" --repo "$env:GITHUB_REPOSITORY" *> $null
-
-          if ($LASTEXITCODE -eq 0) {
-
-              Write-Host "Existing release found."
-              Write-Host "Uploading/replacing release assets..."
-
-              gh release upload "$env:TAG_NAME" `
-                  "release-assets\$env:SETUP_FILENAME" `
-                  "release-assets\$env:PORTABLE_FILENAME" `
-                  "release-assets\SHA256SUMS.txt" `
-                  --clobber `
-                  --repo "$env:GITHUB_REPOSITORY"
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Failed to upload assets to existing release"
-              }
-          }
-          else {
-
-              Write-Host "Release does not exist. Creating new release..."
-
-              gh release create "$env:TAG_NAME" `
-                  "release-assets\$env:SETUP_FILENAME" `
-                  "release-assets\$env:PORTABLE_FILENAME" `
-                  "release-assets\SHA256SUMS.txt" `
-                  --verify-tag `
-                  --generate-notes `
-                  --title "SandiRaksa $env:TAG_NAME" `
-                  --repo "$env:GITHUB_REPOSITORY"
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Failed to create GitHub release"
-              }
-          }
-
-          Write-Host "========================================"
-          Write-Host "GitHub Release completed successfully"
-          Write-Host "========================================"
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: SandiRaksa v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
+          files: |
+            artifacts/windows-build/*
+          body: |
+            ## SandiRaksa v${{ steps.version.outputs.version }}
+            
+            ### Downloads
+            
+            | Platform | Architecture | File |
+            |----------|--------------|------|
+            | Windows | x64 | `SandiRaksa-${{ steps.version.outputs.version }}-windows-x64.exe` |
+            
+            ### Installation
+            
+            **Windows:**
+            1. Download `.exe` file
+            2. Run the executable
+            3. If Windows Defender warns, click "More info" → "Run anyway"
+            
+            ### What's New
+            
+            See [CHANGELOG.md](https://github.com/yuanyudistira/sandiraksa/blob/main/CHANGELOG.md) for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

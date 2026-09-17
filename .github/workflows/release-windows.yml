@@ -1,0 +1,125 @@
+﻿name: Windows Release
+
+# Tag-driven, UNSIGNED Windows release:
+#   build (spec) -> build installer -> checksum -> publish GitHub Release
+#
+# Code signing (SignPath) was removed: the app ships unsigned and is
+# distributed via MSFT Intune / Company Portal, which avoids the SmartScreen
+# prompts that unsigned binaries otherwise trigger for end users.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and Release Windows (unsigned)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve application version
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
+              throw "Release tag '$tag' does not match the expected format: vX.Y.Z"
+          }
+          $version = $Matches["version"]
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "SETUP_FILENAME=SandiRaksa-Setup-$version.exe" >> $env:GITHUB_ENV
+          Write-Host "Release version: $version"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          if (Test-Path "requirements-build.txt") {
+              pip install -r requirements-build.txt
+          }
+          python -m spacy download en_core_web_sm
+
+      - name: Run tests
+        shell: powershell
+        run: |
+          python -m pytest tests/unit -q
+
+      - name: Build SandiRaksa application
+        shell: powershell
+        run: |
+          pyinstaller --clean --noconfirm SandiRaksa.spec
+          if (-not (Test-Path "dist\SandiRaksa.exe")) {
+              throw "Expected executable was not generated: dist\SandiRaksa.exe"
+          }
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) { throw "ISCC.exe was not found after installing Inno Setup." }
+          Write-Host "Inno Setup compiler: $($iscc.Source)"
+
+      - name: Build Windows installer (from unsigned app)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer-output" | Out-Null
+          $appDir = (Resolve-Path "dist").Path
+          & ISCC.exe "/DAppVersion=$env:APP_VERSION" "/DSignedAppDir=$appDir" "installer\SandiRaksa.iss"
+          $installer = "installer-output\$env:SETUP_FILENAME"
+          if (-not (Test-Path $installer)) { throw "Expected installer was not generated: $installer" }
+          Write-Host "Installer generated: $installer"
+
+      - name: Prepare release artifacts and checksum
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          Copy-Item "installer-output\$env:SETUP_FILENAME" "release\$env:SETUP_FILENAME" -Force
+          $portable = "SandiRaksa-$env:APP_VERSION-windows-x64.exe"
+          Copy-Item "dist\SandiRaksa.exe" "release\$portable" -Force
+          $lines = @()
+          foreach ($f in @($env:SETUP_FILENAME, $portable)) {
+              $hash = (Get-FileHash "release\$f" -Algorithm SHA256).Hash.ToLower()
+              $lines += "$hash *$f"
+              Write-Host "SHA256 $f = $hash"
+          }
+          $lines | Set-Content -Path "release\SHA256SUMS.txt" -Encoding ascii
+          "PORTABLE_FILENAME=$portable" >> $env:GITHUB_ENV
+
+      - name: Final release validation
+        shell: powershell
+        run: |
+          if (-not (Test-Path "release\$env:SETUP_FILENAME")) { throw "Installer missing." }
+          if (-not (Test-Path "release\$env:PORTABLE_FILENAME")) { throw "Portable exe missing." }
+          if (-not (Test-Path "release\SHA256SUMS.txt")) { throw "SHA256SUMS.txt is missing." }
+          Write-Host "Final release validation passed."
+
+      - name: Publish GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "release\$env:SETUP_FILENAME" `
+            "release\$env:PORTABLE_FILENAME" `
+            "release\SHA256SUMS.txt" `
+            --verify-tag `
+            --generate-notes `
+            --title "SandiRaksa ${{ github.ref_name }}"

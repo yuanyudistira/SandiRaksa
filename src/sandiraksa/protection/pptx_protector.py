@@ -176,8 +176,9 @@ class PptxProtector:
             logger.error(f"Error detecting entities in PPTX: {e}")
             return []
         finally:
-            if gc_was_enabled:
-                gc.enable()
+            # GC is kept disabled app-wide (see app.application); do NOT
+            # re-enable it here even if it was on when we entered.
+            pass
     
     def _detect_by_spatial_labels(self, slide, location: str) -> list[DetectedEntity]:
         """
@@ -531,8 +532,9 @@ class PptxProtector:
                 error_message=str(e),
             )
         finally:
-            if gc_was_enabled:
-                gc.enable()
+            # GC is kept disabled app-wide (see app.application); do NOT
+            # re-enable it here even if it was on when we entered.
+            pass
     
     def _replace_in_shape(self, shape, value_to_token: dict[str, str]) -> int:
         """Replace values in a shape. Returns count of replacements."""

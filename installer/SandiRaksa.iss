@@ -1,18 +1,17 @@
 ; SandiRaksa Windows installer (Inno Setup).
 ;
-; Public/unsigned build: packages the application from the PyInstaller output.
+; The installer packages the ALREADY-SIGNED application from signed-app/.
 ; Build with:
-;   ISCC.exe /DAppVersion=1.0.4 /DSignedAppDir=<abs path to dist> installer\SandiRaksa.iss
+;   ISCC.exe /DAppVersion=1.0.2 /DSignedAppDir=<abs path to signed-app> installer\SandiRaksa.iss
 ;
-; SignedAppDir defaults to ..\dist so the installer works without a signing
-; step. When a signing pipeline is added, pass /DSignedAppDir=<signed dir>.
+; Never point [Files] at dist/ (that is the unsigned build artifact).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0-dev"
 #endif
 
 #ifndef SignedAppDir
-  #define SignedAppDir "..\dist"
+  #define SignedAppDir "..\signed-app"
 #endif
 
 [Setup]
@@ -45,8 +44,8 @@ CloseApplications=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
-; Checked by default so silent installs still create a desktop shortcut.
-; Users running the wizard can uncheck it.
+; Checked by default so silent installs (Intune / Company Portal) still create
+; a desktop shortcut. Users running the wizard can uncheck it.
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 Name: "quicklaunchicon"; Description: "Create a Quick Launch shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 

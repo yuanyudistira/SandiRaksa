@@ -15,12 +15,36 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-# Fix for PyInstaller --noconsole mode: sys.stdout/stderr may be None
-# This must be done BEFORE importing any module that uses logging or faulthandler
+# Fix for PyInstaller --noconsole mode: sys.stdout/stderr may be None.
+#
+# This MUST run before importing any module that uses logging or faulthandler.
+#
+# We deliberately do NOT use io.StringIO() here. In a --noconsole build the
+# whole app writes to these streams via scattered print("DEBUG: ...") calls,
+# including from the background ScanWorker (a QThread) AND the GUI thread at the
+# same time. io.StringIO() is (a) unbounded, so captured output grows forever
+# (a slow memory leak), and (b) NOT thread-safe, so concurrent writes from the
+# worker and GUI threads can corrupt its internal state and intermittently hang
+# or crash the frozen app. A stateless sink that discards everything avoids
+# both problems: nothing accumulates and there is no shared mutable state to
+# corrupt across threads.
+class _NullWriter:
+    """Thread-safe no-op stream: discards all writes, keeps no state."""
+
+    def write(self, _data):  # noqa: D401 - file-like API
+        return 0
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+
 if sys.stdout is None:
-    sys.stdout = io.StringIO()
+    sys.stdout = _NullWriter()
 if sys.stderr is None:
-    sys.stderr = io.StringIO()
+    sys.stderr = _NullWriter()
 
 import faulthandler
 
@@ -40,13 +64,24 @@ if hasattr(sys.stderr, 'fileno'):
     except (AttributeError, io.UnsupportedOperation):
         pass  # Skip if running in --noconsole mode
 
-# Garbage collection is kept ENABLED. Scanning now runs on a dedicated
-# worker thread (see sandiraksa.ui.scan_worker), so the GUI event loop is no
-# longer re-entered mid-scan via processEvents(). That re-entrancy, combined
-# with a disabled collector, was the source of the intermittent Windows heap
-# corruption (STATUS_HEAP_CORRUPTION, 0xC0000374). With re-entrancy removed it
-# is both safe and desirable to let Python reclaim cyclic garbage normally.
-gc.enable()
+# Root-cause fix for STATUS_HEAP_CORRUPTION (0xC0000374).
+#
+# This app mixes Python's non-deterministic cyclic GC with PySide6/Qt objects
+# whose C++ lifetime is owned by Qt (parent/child, deleteLater). When the
+# automatic collector runs at an arbitrary point inside the Qt event loop it
+# can finalize a Python wrapper whose underlying C++ object Qt already
+# destroyed (or is mid-teardown) -> use-after-free that Windows reports as heap
+# corruption. It surfaced at many points (opening a TXT file, closing a preview
+# dialog, creating a project) because it is timing-dependent, not per-handler.
+#
+# TEMPORARY MITIGATION (Path A): running the cyclic collector at all - whether
+# automatically or via an explicit gc.collect() - has been observed to trip the
+# 0xC0000374 heap corruption, which means some object graph holds a Python
+# wrapper over an already-freed Qt C++ object. Until that root cause (introduced
+# with the Clipboard Guard after v1.0.4) is fixed, we disable automatic
+# collection here AND avoid manual gc.collect() elsewhere. This trades a small
+# risk of cyclic-garbage retention for stability. See the scan/protect workers.
+gc.disable()
 
 
 class SandiRaksaApp:
@@ -142,13 +177,29 @@ class SandiRaksaApp:
             logger.warning(f"Could not show splash screen: {e}")
 
     def _initialize_services(self) -> None:
-        """Initialize core application services."""
-        # TODO: Initialize services in order:
-        # 1. Config/settings
-        # 2. Database
-        # 3. Key store
-        # 4. Localization
-        pass
+        """Initialize core application services on the main thread.
+
+        Critically, we pre-load the shared spaCy/Presidio analyzer HERE, on the
+        main thread, before any background worker can run. Loading the spaCy
+        model on a worker QThread during file protection crashed the app with
+        0xC0000374 (heap corruption in spaCy's from_disk). Loading it once on
+        the main thread means workers only ever reuse the ready analyzer.
+        """
+        try:
+            from sandiraksa.detection.presidio_engine import preload_shared_analyzer
+
+            preload_shared_analyzer()
+        except Exception as e:  # pragma: no cover - environment dependent
+            logger.warning(f"Presidio preload skipped: {e}")
+
+        # CRITICAL: spaCy/Presidio (and some other native libs) re-enable the
+        # cyclic garbage collector during their initialization. We rely on GC
+        # staying OFF (running it corrupts the heap - 0xC0000374 - while native
+        # extensions like spaCy/lxml/openpyxl are mid-operation). Force it back
+        # off after any such init so the mitigation actually holds.
+        if gc.isenabled():
+            gc.disable()
+            logger.info("Re-disabled GC after NLP init (kept off for stability)")
 
     def _create_main_window(self) -> None:
         """Create and configure the main window."""

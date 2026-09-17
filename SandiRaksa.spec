@@ -12,6 +12,12 @@ tmp_ret = collect_all('presidio_analyzer')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('spacy')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# Bundle the English spaCy model package. Without this the frozen app has no
+# NLP model, so spacy.load('en_core_web_sm') fails at runtime. Since the app
+# now preloads the analyzer at startup, a missing model crashed the .exe on
+# launch (worked from source only because the model was in site-packages).
+tmp_ret = collect_all('en_core_web_sm')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
