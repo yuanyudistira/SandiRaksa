@@ -4,6 +4,9 @@ Thank you for your interest in contributing to SandiRaksa! This document provide
 
 ## Code of Conduct
 
+This project follows a [Code of Conduct](CODE_OF_CONDUCT.md). By participating,
+you are expected to uphold it. In short:
+
 - Be respectful and inclusive
 - Focus on constructive feedback
 - Help others learn and grow
@@ -20,8 +23,8 @@ Thank you for your interest in contributing to SandiRaksa! This document provide
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/sandiraksa.git
-   cd sandiraksa
+   git clone https://github.com/yuanyudistira/SandiRaksa.git
+   cd SandiRaksa
    ```
 
 2. Create and activate a virtual environment:
@@ -51,11 +54,12 @@ Thank you for your interest in contributing to SandiRaksa! This document provide
 
 ### Branching Strategy
 
-- `main`: Stable release branch
-- `develop`: Integration branch for features
+- `main`: Stable release branch (tagged releases are cut from here)
 - `feature/xxx`: Feature branches
 - `bugfix/xxx`: Bug fix branches
 - `hotfix/xxx`: Critical fixes for production
+
+Open pull requests against `main` unless a maintainer directs you otherwise.
 
 ### Making Changes
 
@@ -139,7 +143,9 @@ When reporting issues, please include:
 
 ## Security Issues
 
-For security vulnerabilities, please email security@sandiraksa.example.com instead of creating a public issue.
+Please do **not** report security vulnerabilities through public GitHub issues.
+Instead, email **infosecguru.id@gmail.com** with the details. See
+[SECURITY.md](SECURITY.md) for our full disclosure process and what to include.
 
 ## License
 
@@ -147,6 +153,7 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 ## Questions?
 
-Feel free to open a discussion or reach out to the maintainers.
+Open a [GitHub issue](https://github.com/yuanyudistira/SandiRaksa/issues) for
+bugs and feature requests, or email the maintainers at infosecguru.id@gmail.com.
 
 Thank you for contributing! 🙏

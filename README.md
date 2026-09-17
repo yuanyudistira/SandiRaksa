@@ -55,15 +55,15 @@ SandiRaksa adalah aplikasi desktop standalone yang melindungi informasi sensitif
 
 ### Windows
 
-Download dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
-- `SandiRaksa-Setup-1.0.6.exe` (installer — membuat shortcut Start Menu/desktop) **atau**
-- `SandiRaksa-1.0.6-windows-x64.exe` (portable, jalankan langsung)
+Download dari [Release Page](https://github.com/yuanyudistira/SandiRaksa/releases):
+- `SandiRaksa-Setup-1.0.5.exe` (installer — membuat shortcut Start Menu/desktop) **atau**
+- `SandiRaksa-1.0.5-windows-x64.exe` (portable, jalankan langsung)
 
 > ⚠️ **Windows SmartScreen:** Saat pertama kali run, Windows mungkin menampilkan warning "Windows protected your PC" karena aplikasi belum ditandatangani. Klik **"More info"** → **"Run anyway"** untuk melanjutkan.
 
 ### macOS
 
-Download DMG dari [Release Page](https://github.com/yuanyudistira/sandiraksa/releases):
+Download DMG dari [Release Page](https://github.com/yuanyudistira/SandiRaksa/releases):
 - `SandiRaksa-1.0.0-macos-x64.dmg`
 
 > ⚠️ **macOS Gatekeeper:** macOS mungkin memblokir aplikasi karena belum ditandatangani. Buka **System Preferences → Security & Privacy**, lalu klik **"Open Anyway"**.
@@ -214,5 +214,5 @@ Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk panduan kontribusi.
 ## 📧 Kontak
 
 - Email: infosecguru.id@gmail.com
-- GitHub: https://github.com/yuanyudistira/sandiraksa
+- GitHub: https://github.com/yuanyudistira/SandiRaksa
 - Website: https://sandiraksa.infosecguru.id
