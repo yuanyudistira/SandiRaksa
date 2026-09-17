@@ -125,6 +125,31 @@ class MainWindow(QMainWindow):
         self._create_central_widget()
         self._create_status_bar()
         self._connect_language_changes()
+        self._setup_gc_timer()
+
+    def _setup_gc_timer(self) -> None:
+        """Reclaim reference cycles on a timer instead of automatically.
+
+        Automatic cyclic GC is disabled process-wide (see app.application)
+        because it could run mid-event-loop and free Qt objects still in
+        use, causing 0xC0000374 heap corruption. We still break reference
+        cycles (dialogs, models, closures), so we collect deliberately: a
+        low-frequency QTimer fires during idle time, when no handler is on
+        the stack, which is a safe point to collect.
+        """
+        import gc
+        from PySide6.QtCore import QTimer
+
+        self._gc_timer = QTimer(self)
+        self._gc_timer.setInterval(5000)  # every 5s during idle
+        self._gc_timer.timeout.connect(self._on_gc_tick)
+        self._gc_timer.start()
+
+    def _on_gc_tick(self) -> None:
+        """Collect cyclic garbage at a safe idle point."""
+        import gc
+
+        gc.collect()
 
     def _setup_window(self) -> None:
         """Configure window properties."""

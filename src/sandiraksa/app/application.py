@@ -64,13 +64,24 @@ if hasattr(sys.stderr, 'fileno'):
     except (AttributeError, io.UnsupportedOperation):
         pass  # Skip if running in --noconsole mode
 
-# Garbage collection is kept ENABLED. Scanning now runs on a dedicated
-# worker thread (see sandiraksa.ui.scan_worker), so the GUI event loop is no
-# longer re-entered mid-scan via processEvents(). That re-entrancy, combined
-# with a disabled collector, was the source of the intermittent Windows heap
-# corruption (STATUS_HEAP_CORRUPTION, 0xC0000374). With re-entrancy removed it
-# is both safe and desirable to let Python reclaim cyclic garbage normally.
-gc.enable()
+# Root-cause fix for STATUS_HEAP_CORRUPTION (0xC0000374).
+#
+# This app mixes Python's non-deterministic cyclic GC with PySide6/Qt objects
+# whose C++ lifetime is owned by Qt (parent/child, deleteLater). When the
+# automatic collector runs at an arbitrary point inside the Qt event loop it
+# can finalize a Python wrapper whose underlying C++ object Qt already
+# destroyed (or is mid-teardown) -> use-after-free that Windows reports as heap
+# corruption. It surfaced at many points (opening a TXT file, closing a preview
+# dialog, creating a project) because it is timing-dependent, not per-handler.
+#
+# Toggling the collector on/off globally before only moved the crash around.
+# The stable fix: stop the collector from running spontaneously on the GUI
+# thread and reclaim cycles deliberately instead:
+#   * automatic collection is DISABLED here (no collection mid event loop);
+#   * MainWindow schedules gc.collect() on a QTimer during idle time, and the
+#     scan/protect workers already collect on their own threads, so cyclic
+#     garbage is still reclaimed and memory does not grow unbounded.
+gc.disable()
 
 
 class SandiRaksaApp:
