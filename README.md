@@ -55,9 +55,9 @@ SandiRaksa adalah aplikasi desktop standalone yang melindungi informasi sensitif
 
 ### Windows
 
-Download dari [Release Page](https://github.com/yuanyudistira/SandiRaksa/releases):
-- `SandiRaksa-Setup-1.0.5.exe` (installer — membuat shortcut Start Menu/desktop) **atau**
-- `SandiRaksa-1.0.5-windows-x64.exe` (portable, jalankan langsung)
+Download versi terbaru dari [Release Page](https://github.com/yuanyudistira/SandiRaksa/releases/latest):
+- `SandiRaksa-Setup-<versi>.exe` (installer — membuat shortcut Start Menu/desktop) **atau**
+- `SandiRaksa-<versi>-windows-x64.exe` (portable, jalankan langsung)
 
 > ⚠️ **Windows SmartScreen:** Saat pertama kali run, Windows mungkin menampilkan warning "Windows protected your PC" karena aplikasi belum ditandatangani. Klik **"More info"** → **"Run anyway"** untuk melanjutkan.
 
